@@ -4,12 +4,16 @@ Wants=network-online.target systemd-hostnamed.service
 # cloud-final is ordered after multi-user on Ubuntu. Depending on it here
 # would create a cycle with our WantedBy=multi-user.target.
 After=network-online.target systemd-hostnamed.service cloud-init.service cloud-config.service ssh.service sshd.service ssh.socket
+# Ordering does not pull in the daemon: the checker supports an idle SSH socket.
 ConditionPathExists=/var/lib/ventoy-center/manual-init/offline
 
 [Service]
 Type=oneshot
 ExecStart=/bin/bash /opt/ventoy-manual/current/install.sh --resume
 TimeoutStartSec=600
+# DHCP/driver pending remains recorded as pending, not a failed oneshot unit.
+# All other nonzero exit codes (including software failure 4) remain failures.
+SuccessExitStatus=3
 RemainAfterExit=yes
 
 [Install]

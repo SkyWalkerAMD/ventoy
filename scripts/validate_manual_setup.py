@@ -69,6 +69,7 @@ print('PASS: permanent MAC matching, unknown configuration protection, driver ar
 if sys.platform != 'win32':
     subprocess.run([sys.executable, str(ROOT / 'scripts/validate_manual_network.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'scripts/validate_hostname.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'scripts/validate_manual_ssh.py')], check=True)
     driver = (ROOT / 'internal/center/assets/manual/e610-driver.sh').read_text(encoding='utf-8')
     verify = 'verify() {' + driver.split('verify() {', 1)[1].split('if [[ $mode == --check ]]', 1)[0]
     code = 'set -e; kver=test; native_support() { return 1; };\n' + verify
@@ -185,6 +186,14 @@ sleep() { :; }
     # A connected primary NIC must still permit software installation when a
     # secondary NIC or driver is pending. Do not replace pending with success.
     source = (ROOT / 'internal/center/assets/manual/install.sh').read_text(encoding='utf-8')
+    # Pending (3) is a completed oneshot with a pending status record, while
+    # invalid config, failed SSH and software failures must still fail systemd.
+    import configparser
+    unit = configparser.ConfigParser(interpolation=None)
+    unit.read(ROOT / 'internal/center/assets/manual/ventoy-manual-init.service')
+    accepted = {0} | {int(code) for code in unit['Service']['SuccessExitStatus'].split()}
+    assert accepted == {0, 3}
+    assert not unit['Service']['ExecStart'].startswith('-')
     completion = source[source.index('[[ $(systemctl get-default) == multi-user.target ]]'):]
     completion = next(line for line in source.splitlines() if line.startswith('setup_stage() {')) + '\n' + completion
     scenarios = [
@@ -228,6 +237,7 @@ software_action() {
             actual_calls = len((state / 'calls').read_text().splitlines()) if (state / 'calls').exists() else 0
             actual_request = request_file.read_text().strip() if request_file.exists() else None
             assert (result.returncode, actual_calls, actual_request) == (expected_rc, calls, request_after), result
+            assert (result.returncode in accepted) == (expected_rc in (0, 3))
             if software_rc and calls:
                 assert not (state / 'status').exists(), 'failed software transaction was reported as completed'
                 assert not any(line.startswith(('PENDING:', 'VERIFIED:')) for line in result.stdout.splitlines())

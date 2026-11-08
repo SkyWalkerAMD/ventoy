@@ -4,7 +4,7 @@
 
 局域网批量装机管理端。客户端在 BIOS / UEFI 的 Boot 菜单选择网卡，由 **iVentoy / PXE** 加载镜像和自动安装配置；本项目负责目标机器、安装任务、授权、安装包和进度回传。
 
-**当前代码：0.3.0-alpha.57，iVentoy 1.0.49 Pro；Linux CLI 装机优先。** 43 个需要适配的 Linux ISO 已直接内置 E610 驱动，普通手动安装与 PXE 自动安装复用同一成品，并在安装收尾自动持久化驱动。43 个成品的 86 项隔离安装与重启验收通过，物理 E610 验收范围另列。常规无桌面装机使用 Ubuntu Server / live-server、Debian 标准系统与 SSH，以及 CentOS / Rocky / AlmaLinux / RHEL 最小化环境，默认启动到命令行。手动与自动安装均预置含软件分发功能的新版 setup，安装后可直接运行。Windows 保留为次要支持。
+**当前代码：0.3.0-alpha.58，iVentoy 1.0.49 Pro；Linux CLI 装机优先。** 43 个需要适配的 Linux ISO 已直接内置 E610 驱动，普通手动安装与 PXE 自动安装复用同一成品，并在安装收尾自动持久化驱动。43 个成品的 86 项隔离安装与重启验收通过，物理 E610 验收范围另列。常规无桌面装机使用 Ubuntu Server / live-server、Debian 标准系统与 SSH，以及 CentOS / Rocky / AlmaLinux / RHEL 最小化环境，默认启动到命令行。手动与自动安装均预置含软件分发功能的新版 setup，安装后可直接运行。Windows 保留为次要支持。
 
 安装完成后，运行新版 `sudo bash ventoy-linux-setup.run`，会从中心 `software_dir` 自动获取适合本机的 RPM / DEB 并安装或升级。包可直接集中存放，按架构和 EL 版本匹配；同一软件择新、同版本跳过、不降级。中心替换软件后再次执行即可。详见[节点软件分发](docs/deployment/node-software.md)。
 
