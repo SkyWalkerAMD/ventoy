@@ -89,9 +89,15 @@ python3 scripts/validate_ubuntu_uefi_compat.py
 ```
 
 The builder's checks are static and do not claim a successful installation.
-The console A/B reached an initramfs shell. Before publishing a candidate,
-validate the normal default entry and perform a compatibility-entry unattended
-install with injection, disk policy and hard-disk reboot checked on the
-affected machine. Keep those results with the deployment record for that
-candidate hash; a later rebuild does not inherit physical acceptance.
+The console A/B reached an initramfs shell. Before recording hardware
+acceptance, check that the normal default entry is preserved and perform a
+compatibility-entry unattended install with injection, disk policy and
+hard-disk reboot checked on the affected machine. Publishing a candidate for
+this controlled test does not itself establish hardware acceptance. Keep the
+results with the deployment record for that candidate hash; a later rebuild
+does not inherit physical acceptance.
+
+The normal default path still uses GRUB's TPM verifier. On the affected
+firmware, select the explicitly named compatibility item; preserving the
+default does not mean that its known allocation failure has been fixed.
 No other Ubuntu release, HWE kernel or Linux distribution is covered.

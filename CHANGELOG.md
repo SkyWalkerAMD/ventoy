@@ -5,6 +5,7 @@
 - Fix setup verification on Ubuntu systems using SSH socket activation: prepare the privilege separation directory safely and accept a healthy listening SSH socket before the first connection starts the daemon.
 - Keep pending setup results distinct from failed systemd services; real verification and configuration errors still fail.
 - Record the Z790 diagnostic bootstrap's successful manual installation and the limitations found during repeated boot tests.
+- Add an explicit Ubuntu 24.04.3 UEFI low-memory menu item for the verified GRUB TPM allocation failure. Preserve the normal menu and shared manual/automatic ISO bindings; the compatibility choice skips GRUB TPM measurements for that boot.
 
 ## 0.3.0-alpha.57 — 2026-11-08
 
