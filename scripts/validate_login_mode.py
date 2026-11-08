@@ -27,6 +27,7 @@ def transactions():
     if not sys.platform.startswith('linux'):
         print('SKIP: Linux login transaction tests')
         return
+    runtime_socket_checks()
     for scenario in ('success', 'repeated', 'wrong-password', 'no-sudo', 'no-user',
                      'locked-user', 'invalid-user', 'noninteractive', 'match-override',
                      'reload-failure', 'post-sudo-failure', 'root-already-locked',
@@ -120,7 +121,8 @@ def transactions():
                  mock.patch.object(sys.stdin, 'isatty', return_value=scenario != 'noninteractive'), \
                  mock.patch.object(sys.stdout, 'isatty', return_value=True), \
                  mock.patch.object(mod.getpass, 'getpass', return_value='fixture secret'), \
-                 mock.patch.object(mod.time, 'sleep'):
+                 mock.patch.object(mod.time, 'sleep'), \
+                 mock.patch.object(mod, 'prepare_ssh_runtime'):
                 success = scenario in ('success', 'repeated', 'root-already-locked')
                 if scenario == 'invalid-saved-mode':
                     mod.POLICY.write_text('{"schema":1,"mode":"typo","user":"user"}')
@@ -161,6 +163,10 @@ def transactions():
     # Stop at the old root-enabled branch so a failed guard cannot touch the host.
     ssh_source = (ROOT / 'internal/center/assets/manual/manual-ssh.sh').read_text()
     dispatch = ssh_source.split('if [[ $mode == --apply ]]; then', 1)[0]
+    # This dispatch-only fixture must not prepare the host's /run. The complete
+    # checker and runtime protections run separately in validate_manual_ssh.py.
+    assert dispatch.count('\nprepare_sshd_runtime\n') == 1
+    dispatch = dispatch.replace('\nprepare_sshd_runtime\n', '\n')
     with tempfile.TemporaryDirectory(prefix='vc-login-dispatch-') as temp:
         folder = Path(temp)
         (folder / 'bin').mkdir()
@@ -202,6 +208,122 @@ def transactions():
             else:
                 assert allowed
     print('PASS: setup/migration/check dispatch preserves user-only choice; new installs and RPM defaults unchanged; remote Match overrides rejected')
+
+
+def runtime_socket_checks():
+    # Exercise user-only policy checks before any connection activates the
+    # daemon. No service is started and no listener is contacted by these tests.
+    for daemon, socket, expected in [('active', 'inactive', True),
+                                     ('inactive', 'active', True),
+                                     ('inactive', 'inactive', False),
+                                     ('failed', 'active', False),
+                                     ('', 'active', False)]:
+        mod = load()
+        calls = []
+
+        def query(args, **kwargs):
+            calls.append(args)
+            if args == ['systemctl', 'is-active', '--quiet', 'ssh.service']:
+                if daemon != 'active':
+                    raise mod.PolicyError('inactive daemon')
+            elif args == ['systemctl', 'is-active', '--quiet', 'ssh.socket']:
+                if socket != 'active':
+                    raise mod.PolicyError('inactive socket')
+            elif args == ['systemctl', 'show', 'ssh.service', '-p', 'ActiveState', '--value']:
+                return daemon + '\n'
+            else:
+                raise AssertionError(args)
+            return ''
+
+        with mock.patch.object(mod, 'run', query):
+            try:
+                mod.check_listener()
+            except mod.PolicyError:
+                assert not expected, (daemon, socket)
+            else:
+                assert expected, (daemon, socket)
+        assert all(args[1] in ('is-active', 'show') for args in calls)
+
+    for shape in ('missing', 'existing', 'concurrent', 'symlink', 'parent-symlink',
+                  'parent-writable', 'file', 'writable', 'private', 'owner'):
+        mod = load()
+        with tempfile.TemporaryDirectory(prefix='vc-login-runtime-') as temp:
+            root = Path(temp)
+            parent = root / 'run'
+            parent.mkdir(mode=0o755)
+            parent.chmod(0o755)
+            mod.SSH_RUNTIME = runtime = parent / 'sshd'
+            sentinel = root / 'untouched'
+            sentinel.mkdir(mode=0o700)
+            (sentinel / 'marker').write_text('keep\n')
+            if shape in ('existing', 'writable', 'private', 'owner'):
+                runtime.mkdir(mode=0o755)
+                runtime.chmod(0o755)
+                (runtime / 'marker').write_text('keep\n')
+                if shape == 'writable':
+                    runtime.chmod(0o777)
+                elif shape == 'private':
+                    runtime.chmod(0o700)
+            elif shape == 'symlink':
+                runtime.symlink_to(sentinel, target_is_directory=True)
+            elif shape == 'parent-symlink':
+                parent.rmdir()
+                parent.symlink_to(sentinel, target_is_directory=True)
+            elif shape == 'parent-writable':
+                parent.chmod(0o777)
+            elif shape == 'file':
+                runtime.write_text('keep\n')
+            actual_lstat = Path.lstat
+            actual_mkdir = Path.mkdir
+
+            def create(path, *args, **kwargs):
+                actual_mkdir(path, *args, **kwargs)
+                if shape == 'concurrent' and path == runtime:
+                    path.chmod(0o755)
+                    raise FileExistsError('fixture: daemon created runtime concurrently')
+
+            def metadata(path, *args, **kwargs):
+                # Fixtures can run under an unprivileged CI user. Preserve
+                # actual file type/mode while modeling root or a foreign owner.
+                info = actual_lstat(path, *args, **kwargs)
+                from types import SimpleNamespace
+                return SimpleNamespace(st_mode=info.st_mode, st_uid=(1000 if shape == 'owner' and path == runtime else 0), st_gid=0)
+
+            calls = []
+
+            def command(args, **kwargs):
+                calls.append(args)
+                if args[0] == '/sbin/restorecon':
+                    assert args[1] == str(runtime)
+                    return ''
+                if args[0] == '/usr/sbin/sshd':
+                    assert runtime.is_dir() and not runtime.is_symlink()
+                    if '-T' in args:
+                        return 'passwordauthentication yes\nport 22\n'
+                    return ''
+                raise AssertionError(args)
+
+            expected = shape in ('missing', 'existing', 'concurrent')
+            with mock.patch.object(Path, 'lstat', metadata), mock.patch.object(Path, 'mkdir', create), \
+                 mock.patch.object(mod, 'run', command):
+                try:
+                    assert mod.check_ssh('user', restricted=False) == '22'
+                except mod.PolicyError:
+                    assert not expected, shape
+                else:
+                    assert expected, shape
+            assert (sentinel / 'marker').read_text() == 'keep\n'
+            assert sentinel.stat().st_mode & 0o777 == 0o700
+            if expected:
+                assert runtime.stat().st_mode & 0o777 == 0o755
+            else:
+                assert not calls, (shape, calls)
+            if shape in ('existing', 'writable', 'private', 'owner'):
+                assert (runtime / 'marker').read_text() == 'keep\n'
+                assert runtime.stat().st_mode & 0o777 == {'writable': 0o777, 'private': 0o700}.get(shape, 0o755)
+            if shape == 'file':
+                assert runtime.read_text() == 'keep\n'
+    print('PASS: ordinary-user checks support idle SSH sockets and reject unsafe runtime paths/failed daemons')
 
 
 def native():

@@ -7,6 +7,36 @@ state=/var/lib/ventoy-center/manual-init
 die() { echo "SSH: $*" >&2; exit 1; }
 . /etc/os-release
 case "$ID" in ubuntu|debian) family=apt; service=ssh;; *) family=rpm; service=sshd;; esac
+case "$mode" in --apply|--check) ;; *) exit 2;; esac
+# Socket activation can leave ssh.service inactive until the first connection.
+# /run is recreated on every boot, so a previous apply cannot prepare this
+# directory for a later --check. Create only the expected empty runtime path;
+# never follow a link or repair an existing unsafe directory by chmod/chown.
+prepare_sshd_runtime() {
+    local permissions
+    [[ -d /run && ! -L /run && $(stat -c '%u:%g' /run) == 0:0 ]] || die 'Unsafe SSH runtime parent: /run.'
+    permissions=$(stat -c '%a' /run)
+    [[ $permissions =~ ^[0-7]{3,4}$ ]] && (( (8#$permissions & 0022) == 0 )) || die 'Unsafe SSH runtime parent permissions: /run.'
+    if [[ ! -e /run/sshd && ! -L /run/sshd ]]; then
+        if mkdir -m 0755 /run/sshd 2>/dev/null; then
+            if command -v restorecon >/dev/null; then restorecon /run/sshd; fi
+        else
+            # A first incoming connection may start sshd concurrently. Validate
+            # its directory below; do not fail merely because it appeared.
+            [[ -e /run/sshd || -L /run/sshd ]] || die 'Cannot create SSH runtime directory: /run/sshd.'
+        fi
+    fi
+    [[ -d /run/sshd && ! -L /run/sshd && $(stat -c '%a:%u:%g' /run/sshd) == 755:0:0 ]] || die 'Unsafe SSH runtime directory: /run/sshd (expected root:root 0755).'
+}
+ssh_listener_active() {
+    local state
+    systemctl is-active --quiet "$service.service" && return 0
+    [[ $family == apt ]] && systemctl is-active --quiet ssh.socket || return 1
+    # An idle socket is valid; an already failed daemon must remain a failure.
+    state=$(systemctl show "$service.service" -p ActiveState --value) || return 1
+    case "$state" in inactive|activating|active|reloading) return 0;; *) return 1;; esac
+}
+prepare_sshd_runtime
 # An explicit user-only choice survives full setup, migration, --check and boot
 # recovery. Never recreate passwords or prepend root=yes in this mode.
 if [[ $family == apt && ( -e "$state/login-policy.json" || -L "$state/login-policy.json" ) ]]; then
@@ -57,7 +87,6 @@ if [[ $mode == --apply ]]; then
     }
     cfg=/etc/ssh/sshd_config
     [[ -f $cfg && ! -L $cfg ]] || die 'sshd_config must be a regular file.'
-    mkdir -p /run/sshd; chmod 0755 /run/sshd
     ssh-keygen -A
     backup=$(mktemp -d "$state/ssh-backup.XXXXXXXX")
     cp -p "$cfg" "$backup/sshd_config"
@@ -103,9 +132,9 @@ if [[ $mode == --apply ]]; then
     elif command -v ufw >/dev/null && ufw status | grep -qx 'Status: active'; then
         ufw allow "$port/tcp"
     fi
-elif [[ $mode != --check ]]; then exit 2; fi
+fi
 sshd -t
-systemctl is-active --quiet "$service.service"
+ssh_listener_active || die 'Neither a healthy SSH service nor its activation socket is active.'
 effective=$(sshd -T -C user=root,host=localhost,addr=127.0.0.1)
 grep -qx 'permitrootlogin yes' <<< "$effective" || die 'Effective root login policy is not yes.'
 grep -qx 'passwordauthentication yes' <<< "$effective" || die 'Effective password authentication is not yes.'

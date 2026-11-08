@@ -2,7 +2,8 @@
 """Opt-in Ubuntu/Debian user + sudo login, with a verified recovery path.
 
 Never called by an installer. A saved policy is also read by later setup runs.
-Only the interactive restore action changes login policy; --check is read-only.
+Only the interactive restore action changes login policy; --check may prepare
+the root-owned SSH runtime directory but never changes login configuration.
 """
 import argparse
 import contextlib
@@ -26,6 +27,7 @@ CONFIG = Path('/etc/ssh/sshd_config')
 CLOUD = Path('/etc/cloud/cloud.cfg.d/99-ventoy-root-ssh.cfg')
 HELPER = Path('/usr/local/lib/ventoy-center/login-mode.py')
 AUTO_CHECK = Path('/usr/local/sbin/ventoy-center-root-ssh')
+SSH_RUNTIME = Path('/run/sshd')
 BEGIN = '# BEGIN VENTOY USER LOGIN'
 END = '# END VENTOY USER LOGIN'
 AUTO_GUARD = '''# BEGIN VENTOY LOGIN MODE GUARD
@@ -157,7 +159,44 @@ def check_match_overrides(config):
     visit(config)
 
 
+def prepare_ssh_runtime():
+    parent = SSH_RUNTIME.parent.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or
+            parent.st_gid != 0 or parent.st_mode & 0o022):
+        raise PolicyError('Unsafe SSH runtime parent: {}.'.format(SSH_RUNTIME.parent))
+    if not SSH_RUNTIME.exists() and not SSH_RUNTIME.is_symlink():
+        # Explicit chmod is confined to the directory just created by us. Never
+        # widen permissions or change ownership of an existing runtime path.
+        try:
+            SSH_RUNTIME.mkdir(mode=0o755)
+        except FileExistsError:
+            # A connection may have activated sshd since the existence check.
+            # The same type, owner and permission checks still apply below.
+            pass
+        else:
+            SSH_RUNTIME.chmod(0o755)
+            if Path('/sbin/restorecon').is_file():
+                run(['/sbin/restorecon', str(SSH_RUNTIME)])
+    info = SSH_RUNTIME.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or
+            stat.S_IMODE(info.st_mode) != 0o755):
+        raise PolicyError('Unsafe SSH runtime directory: {} (expected root:root 0755).'.format(SSH_RUNTIME))
+
+
+def check_listener():
+    try:
+        run(['systemctl', 'is-active', '--quiet', 'ssh.service'])
+        return
+    except PolicyError:
+        # Ubuntu can listen on ssh.socket before any client starts ssh.service.
+        run(['systemctl', 'is-active', '--quiet', 'ssh.socket'])
+        state = run(['systemctl', 'show', 'ssh.service', '-p', 'ActiveState', '--value']).strip()
+        if state not in ('inactive', 'activating', 'active', 'reloading'):
+            raise PolicyError('The socket-activated SSH daemon is not healthy.')
+
+
 def check_ssh(user, config=None, restricted=True):
+    prepare_ssh_runtime()
     args = ['/usr/sbin/sshd', '-t']
     if config is not None:
         args += ['-f', str(config)]
@@ -181,7 +220,7 @@ def check(policy=None):
         print('LOGIN_MODE: no user-only policy selected; installation defaults are unchanged.')
         return
     check_user(policy['user'])
-    run(['systemctl', 'is-active', '--quiet', 'ssh.service'])
+    check_listener()
     check_ssh(policy['user'])
     if not shadow('root').startswith(('!', '*')):
         raise PolicyError('Root console password is not locked.')
@@ -240,7 +279,7 @@ def restore(user):
     validate_name(user)
     # Fail before any account/SSH changes when a recovery login is unavailable.
     check_user(user)
-    run(['systemctl', 'is-active', '--quiet', 'ssh.service'])
+    check_listener()
     port = check_ssh(user, restricted=False)
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise PolicyError('Run this action in an interactive terminal to verify the ordinary user password.')

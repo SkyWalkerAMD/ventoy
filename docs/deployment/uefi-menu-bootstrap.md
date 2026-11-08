@@ -94,11 +94,21 @@ The manual installation initially left root locked. After explicitly running
 setup in offline mode with a hostname, its local root/user SSH checks passed and
 a separate root SSH connection succeeded.
 
+Repeated tests later that day did not reproduce reliable installer startup. Two
+automatic-entry attempts (`auto:1`) and a subsequent manual-entry attempt
+(`auto:0`) stopped after approximately 0.65 seconds of kernel output. Adding
+`nomodeset` did not resolve the stall. A controlled test of GrubBoot (mode 2)
+reported `out of memory` and then a black screen; VtoyBoot (mode 0) was restored.
+The installed SSD system continued to boot successfully across repeated local
+reboots. The automatic attempts did not reach disk writes.
+
 The generic builder in this directory has separately passed input/refusal tests
 and native artifact checks for both build modes. Its generated ISOs have not yet
 been booted on hardware; the physical results above belong to the site-specific
-diagnostic ISO. A complete automatic-installation test is still pending.
+diagnostic ISO. A successful complete automatic-installation test is still
+pending.
 
-These results establish a working manual-installation fallback for this tested
-configuration. They do not establish the original `can't allocate initrd` cause,
+These results record one successful manual installation, not a stable
+manual-installation fallback. The later startup failures remain under
+investigation. They do not establish the original `can't allocate initrd` cause,
 prove that the original firmware PXE path is fixed, or exercise I226-V networking.

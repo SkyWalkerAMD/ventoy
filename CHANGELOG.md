@@ -1,5 +1,11 @@
 # 开发记录
 
+## 0.3.0-alpha.58 — 2026-11-08
+
+- Fix setup verification on Ubuntu systems using SSH socket activation: prepare the privilege separation directory safely and accept a healthy listening SSH socket before the first connection starts the daemon.
+- Keep pending setup results distinct from failed systemd services; real verification and configuration errors still fail.
+- Record the Z790 diagnostic bootstrap's successful manual installation and the limitations found during repeated boot tests.
+
 ## 0.3.0-alpha.57 — 2026-11-08
 
 - Stop displaying Ventoy/setup reports on the installed system's boot console
