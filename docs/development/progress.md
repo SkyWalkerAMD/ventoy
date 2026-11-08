@@ -1,5 +1,34 @@
 # Ventoy Center 当前进度
 
+## alpha.58、Debian 13.7 与 Z790 引导验收（2026-11-08）
+
+中心 `192.168.1.2` 已发布 **0.3.0-alpha.58**，iVentoy 为 **1.0.49 Pro**。
+当前 60 个镜像中有 53 个 Linux 手动／自动共享入口；全部入口文件和注入包内的
+setup 已逐一回读，SHA-256 为
+`7057aa2f45ea8c3103a191a23e7375e11f1e9755b41935b5cd4d51a3e260364d`。
+Debian 13.7 DVD 已增加、启用并完成驱动 ABI 与注入检查，具体构建和实机边界见
+[Debian 记录](debian137-2026-11-08.md)。
+
+安装后的 Ventoy/setup 控制台及 SSH 提示已取消；验收服务、磁盘报告和中心上报
+继续静默运行。已装节点执行新版完整 setup 或 `--upgrade` 后迁移已识别的旧提示
+文件；仅中心发布不会主动改写旧节点。Ubuntu SSH socket activation 的首次启动
+检查也已修复，未获 DHCP 租约的待完成状态不再被误标成 systemd 服务失败。
+
+Z790 HERO / 14900KS / PCIe I350 的 Ubuntu 24.04.3 自动安装已完成，两次硬盘
+启动均通过 SSH、容量分区、内核锁定、禁用更新和预置脚本检查；第二次已断开
+虚拟光驱。连续 root/user SSH 登录没有重复 Ventoy 提示。
+`initrd` 分配错误由 Ubuntu GRUB TPM verifier 的整文件缓冲分配触发；发布的
+同一 ISO 增加显式 `low-memory compatibility` 菜单项，选择后跳过当次 GRUB
+TPM 测量，不修改固件 TPM/Secure Boot 设置。原默认项仍保留；此验收不代表
+其他系统或未接线 I226-V 已通过。详见[实机记录](z790-ubuntu-2026-11-08.md)和
+[使用说明](../deployment/ubuntu-uefi-low-memory.md)。
+
+服务器构建残留已按引用和挂载审计清理，最终 `/home` 可用约 **127.65 GiB**；
+生产 ISO、当前发布包、回退文件及验收证据保留。相关源码见
+[PR #37](https://github.com/SkyWalkerAMD/ventoy/pull/37)、
+[PR #38](https://github.com/SkyWalkerAMD/ventoy/pull/38) 和
+[PR #39](https://github.com/SkyWalkerAMD/ventoy/pull/39)。
+
 ## 仓库迁移到 SkyWalkerAMD（2026-11-01）
 
 仓库已转移至 [SkyWalkerAMD/ventoy](https://github.com/SkyWalkerAMD/ventoy)，仓库 ID `1416418315` 与迁移前一致，迁移时 main 为 `160ae20`。本地 origin、Go 模块及内部导入地址、此仓库的历史 PR/CI 链接同步到新地址。

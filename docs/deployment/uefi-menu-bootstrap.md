@@ -102,13 +102,17 @@ reported `out of memory` and then a black screen; VtoyBoot (mode 0) was restored
 The installed SSD system continued to boot successfully across repeated local
 reboots. The automatic attempts did not reach disk writes.
 
+The subsequent GRUB console A/B isolated an allocation failure in Ubuntu's TPM
+verifier: the identical initrd loaded after unloading that GRUB module. The
+[optional Ubuntu compatibility entry](ubuntu-uefi-low-memory.md) implements this
+explicit choice without changing firmware TPM settings. It subsequently passed
+an Ubuntu 24.04.3 automatic installation and hard-disk startup on the same Z790
+machine; see the [dated acceptance record](../development/z790-ubuntu-2026-11-08.md)
+for the exact artifact and scope. The bootstrap and the GRUB compatibility
+choice address different stages of the boot chain.
+
 The generic builder in this directory has separately passed input/refusal tests
 and native artifact checks for both build modes. Its generated ISOs have not yet
-been booted on hardware; the physical results above belong to the site-specific
-diagnostic ISO. A successful complete automatic-installation test is still
-pending.
-
-These results record one successful manual installation, not a stable
-manual-installation fallback. The later startup failures remain under
-investigation. They do not establish the original `can't allocate initrd` cause,
-prove that the original firmware PXE path is fixed, or exercise I226-V networking.
+been booted on hardware; the physical results belong to the site-specific
+diagnostic ISO. They do not prove that the original firmware PXE path is fixed,
+cover every Linux image, or exercise I226-V networking.
