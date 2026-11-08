@@ -5,13 +5,17 @@ entry is software coverage, not proof of successful installation on every CPU,
 NIC, disk controller or firmware combination. Physical acceptance is recorded
 separately by the operator.
 
-## What changes in alpha.48
+## Installation results
 
 - The installed system writes `/run/ventoy-install-report.txt` and a persistent
-  copy in `/var/lib/ventoy-center/installation-report.txt`. It displays hostname,
+  copy in `/var/lib/ventoy-center/installation-report.txt`. These files contain hostname,
   IPv4 addresses, kernel, RAID status, update-policy check, setup status and hash.
-  An idle agetty prompt is redrawn after cloud-init/bootstrap settles. Existing
-  authenticated shells, SSH and network services are not restarted.
+  Reports are uploaded to the center in the background. Boot and login screens
+  keep the distribution's normal prompts; Ventoy does not print a setup reminder
+  or redraw getty. Running an updated setup removes the two recognized legacy
+  Ventoy banner files, while preserving customized files, `/etc/issue` and
+  `/etc/motd`. Existing authenticated shells, SSH and network services are not
+  restarted.
 - Automatic installation checks and full setup execution are separate. Manual
   installation retains the account/network choices made in the installer.
   Ubuntu/Debian update protection applies during installation; the remaining full

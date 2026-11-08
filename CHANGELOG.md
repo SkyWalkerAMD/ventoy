@@ -1,5 +1,13 @@
 # 开发记录
 
+## 0.3.0-alpha.57 — 2026-11-08
+
+- Stop displaying Ventoy/setup reports on the installed system's boot console
+  and login shell. Keep acceptance checks, local reports and center uploads;
+  upgrades remove only recognized generated banners and preserve custom content.
+- Cover Debian 13.7 DVD and netinst names with the existing Debian 13 installer
+  profile, shared manual/automatic ISO hooks and CLI installation policies.
+
 ## 0.3.0-alpha.56 — 2026-11-02
 
 - Add an explicit Ubuntu/Debian `--restore-user-login` action: verify an existing

@@ -62,6 +62,8 @@ func TestProfileSelectionAndCompatibility(t *testing.T) {
 		{"Debian/debian-11.4.0-amd64-DVD-1.iso", "debian-11"},
 		{"Debian/debian-12.5.0-amd64-DVD-1.iso", "debian-12"},
 		{"Debian/debian-13.4.0-amd64-DVD-1.iso", "debian-13"},
+		{"Debian/debian-13.7.0-amd64-DVD-1.iso", "debian-13"},
+		{"Debian/debian-13.7.0-amd64-netinst.iso", "debian-13"},
 		{"Debian/debian-13.1.0-amd64-netinst.iso", "debian-13"},
 		{"custom-linux.iso", ""}, {"rocky-100-x86_64.iso", ""},
 	} {
@@ -89,6 +91,10 @@ func TestDesktopAndArchivedMediaBoundaries(t *testing.T) {
 		{"ubuntu-26.04", "ubuntu-26.04-desktop-amd64.iso", false},
 		{"debian-10", "debian-10.11.0-amd64-DVD-1.iso", true},
 		{"debian-10", "debian-10.11.0-amd64-netinst.iso", false},
+		{"debian-13", "debian-13.7.0-amd64-DVD-1.iso", true},
+		{"debian-13", "debian-13.7.0-amd64-netinst.iso", true},
+		{"debian-13", "debian-13.7.0-arm64-DVD-1.iso", false},
+		{"debian-13", "debian-live-13.7.0-amd64-standard.iso", false},
 	} {
 		p, _ := findProfile(test.profile)
 		if err := validateMediaProfile(p, test.iso); (err == nil) != test.valid {
@@ -177,6 +183,97 @@ func TestDebianDVDUsesOnlyInstallationMedia(t *testing.T) {
 					t.Fatalf("%s %s mirror policy mismatch", iso, name)
 				}
 			}
+		}
+	}
+}
+
+func TestDebian137SharedInstallationEntry(t *testing.T) {
+	s := stagingFixture(t)
+	s.config.PublicURL = "https://deploy.example:26080"
+	s.config.LinuxAdminUsername = "user"
+	s.config.LinuxInitialPasswordHash = "$6$example$" + strings.Repeat("a", 86)
+	s.ca = []byte("fixture CA, not valid for deployment")
+	s.config.LinuxSetupPreload = true
+	var err error
+	s.manualBundle, err = packManualSetup(map[string][]byte{
+		"install.sh": []byte("#!/bin/sh\necho inert Debian 13.7 fixture\n"),
+		"VERSION":    []byte(Version + "\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const iso = "Debian/debian-13.7.0-amd64-DVD-1.iso"
+	source := filepath.Join(s.config.ISODir, filepath.FromSlash(iso))
+	if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("Debian 13.7 fixture, not bootable"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w := request(s, "POST", "/api/pxe/entries", s.admin, map[string]string{
+		"label": "Debian 13.7 DVD", "profile": "debian-13", "iso": iso,
+		"username": "user", "password_hash": "$6$example$" + strings.Repeat("a", 86),
+	})
+	mustCode(t, w, 201)
+	var created PXEEntry
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := "/api/pxe/entries/" + created.ID
+	mustCode(t, request(s, "POST", endpoint+"/prepare", s.admin, nil), 200)
+	mustCode(t, request(s, "POST", endpoint+"/enabled", s.admin, map[string]bool{"enabled": true}), 200)
+	st := s.store.snapshot()
+	e := *findPXEEntry(&st, created.ID)
+	if e.Preparation.ISOPath != "iso/"+iso || e.Preparation.SetupSHA256 == "" {
+		t.Fatal("Debian 13.7 must share its original ISO and record the current setup")
+	}
+	files, err := s.renderPXEFiles(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"mirror/suite string trixie", "apt-setup/use_mirror boolean false", "apt-setup/services-select multiselect\n", "/dev/ventoy-center-not-authorized"} {
+		if !strings.Contains(files["preseed.cfg"], want) {
+			t.Fatal("Debian 13.7 automatic selection lost DVD/offline or disk authorization policy", want)
+		}
+	}
+	archive, err := readInjection([]byte(files[debianInjectionName]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"usr/lib/finish-install.d/93ventoy-manual-preload",
+		"usr/lib/post-base-installer.d/93ventoy-update-policy",
+		"usr/lib/pre-pkgsel.d/93ventoy-installer-cache",
+		"lib/debian-installer-startup.d/S99ventoy-diagnostics",
+		"ventoy-manual-preload/target-update-policy.sh",
+		"ventoy-manual-preload/copy-to-target.sh",
+	} {
+		if len(archive[name].Data) == 0 || archive[name].Mode&0111 == 0 {
+			t.Fatal("manual and automatic Debian 13.7 need an executable installer hook", name)
+		}
+	}
+	if string(archive["ventoy-manual-preload/ventoy-linux-setup.run"].Data) != string(manualSetupLauncher(s.manualBundle)) {
+		t.Fatal("Debian 13.7 preload differs from the current downloadable setup")
+	}
+	// The shared injection also runs on the manual branch. Only choosing the
+	// separate preseed answer may activate automatic installation or disk writes.
+	for name := range archive {
+		if strings.HasSuffix(name, "preseed.cfg") || strings.Contains(name, "cmdline.d/") {
+			t.Fatal("shared Debian 13.7 injection must not force automatic installation", name)
+		}
+	}
+	ticket := pxeTicket(t, s, e, pxeInventory())
+	w = request(s, "POST", "/pxe/"+e.ID+"/install", e.Token, map[string]string{
+		"ticket": ticket["ticket"], "disk_serial": "DISK-DEMO-001", "confirmation": "ERASE DISK-DEMO-001",
+	})
+	mustCode(t, w, 200)
+	var payload map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"apt-setup/use_mirror boolean false", "pkgsel/upgrade select none", "copy-to-target.sh", "passwd/root-login boolean true"} {
+		if !strings.Contains(payload["config"], want) {
+			t.Fatal("authorized Debian 13.7 install lost required policy", want)
 		}
 	}
 }

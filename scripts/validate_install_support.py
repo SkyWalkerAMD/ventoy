@@ -45,11 +45,46 @@ with tempfile.TemporaryDirectory() as directory:
     apt_config = (target/'etc/apt/apt.conf.d/90ventoy-installer-cache').read_text()
     assert 'Acquire::http::Timeout "1200"' in apt_config
     assert 'Acquire::AllowInsecureRepositories "false"' in apt_config
-    run(src/'support-install.sh', target)
+    installed = run(src/'support-install.sh', target)
+    assert not installed.stdout
     assert (target/'etc/hostname').read_text() == 'keep-my-host\n'
     assert (target/'var/lib/ventoy-center/install-mode').read_text() == 'manual\n'
     assert (target/'usr/local/lib/ventoy-install-support/acceptance.sh').stat().st_mode & 0o777 == 0o700
     assert (target/'etc/systemd/system/timers.target.wants/ventoy-install-report.timer').is_symlink()
+    profile_banner = target/'etc/profile.d/90-ventoy-install-report.sh'
+    issue_banner = target/'etc/issue.d/90-ventoy.issue'
+    assert not profile_banner.exists() and not issue_banner.exists()
+
+    # Upgrading setup removes its previous generated banners, never the normal
+    # distribution banners or a local customization at the old managed paths.
+    profile_banner.parent.mkdir(parents=True)
+    issue_banner.parent.mkdir(parents=True)
+    profile_banner.write_text('case "$-" in *i*) [ ! -r /run/ventoy-install-report.txt ] || cat /run/ventoy-install-report.txt;; esac\n')
+    issue_banner.write_text('\nVentoy installation report | old-release | manual\nSetup: PRELOADED\n')
+    (target/'etc/issue').write_text('Distribution console login\n')
+    (target/'etc/motd').write_text('Local administrator message\n')
+    run(src/'support-install.sh', target)
+    assert not profile_banner.exists() and not issue_banner.exists()
+    assert (target/'etc/issue').read_text() == 'Distribution console login\n'
+    assert (target/'etc/motd').read_text() == 'Local administrator message\n'
+    for p in (profile_banner, issue_banner):
+        p.write_text('Local customization\n')
+    run(src/'support-install.sh', target)
+    assert all(p.read_text() == 'Local customization\n' for p in (profile_banner, issue_banner))
+    for p in (profile_banner, issue_banner):
+        p.unlink()
+        p.symlink_to(target/'etc/issue')
+    run(src/'support-install.sh', target)
+    assert all(p.is_symlink() for p in (profile_banner, issue_banner))
+    assert (target/'etc/issue').read_text() == 'Distribution console login\n'
+    for p in (profile_banner, issue_banner):
+        p.unlink()
+    # Never traverse a symlinked banner directory during migration.
+    profile_banner.parent.rmdir()
+    profile_banner.parent.symlink_to(issue_banner.parent, target_is_directory=True)
+    blocked = run(src/'support-install.sh', target, ok=False)
+    assert blocked.returncode and 'Unsafe support destination: /etc/profile.d' in blocked.stderr
+    profile_banner.parent.unlink()
     (target/'var/lib/ventoy-center/install-mode').write_text('automatic\n')
     run(src/'support-install.sh', target)
     assert (target/'var/lib/ventoy-center/install-mode').read_text() == 'automatic\n'
@@ -69,7 +104,7 @@ with tempfile.TemporaryDirectory() as directory:
         'findmnt': 'echo ext4', 'hostname': 'echo user-host',
         'ip': 'echo "2: eno1 inet 192.0.2.1/24 scope global dynamic eno1"',
         'systemctl': 'echo "$*" >> "'+str(commands)+'"; case "$1" in show) echo ActiveState=inactive;; esac',
-        'agetty': 'echo "$*" >> "'+str(commands)+'"; [ "$1" != --help ] || echo --reload',
+        'agetty': 'echo "agetty $*" >> "'+str(commands)+'"; exit 1',
     }
     for name, body in stubs.items():
         p = target/'fake-bin'/name; p.write_text('#!/bin/sh\n'+body+'\n'); p.chmod(0o755)
@@ -77,12 +112,17 @@ with tempfile.TemporaryDirectory() as directory:
     source = re.sub(r'(?<![\w/])/(var|run|etc|proc|usr|dev)(?=/)', lambda m: str(target)+m[0], source)
     script = base/'report.sh'; script.write_text(source)
     env = dict(os.environ, PATH=str(target/'fake-bin')+':'+os.environ['PATH'])
-    run(script, env=env)
+    console = target/'dev/tty1'
+    console.write_text('operator console content\n')
+    reported = run(script, env=env)
+    assert not reported.stdout
     report = (target/'run/ventoy-install-report.txt').read_text()
     assert 'PENDING / FAILED' in report and 'PRELOADED, NOT EXECUTED' in report
     assert '192.0.2.1/24' in report and 'user-host' in report and 'VERIFIED' in report
     run(script, env=env)
-    assert commands.read_text().splitlines().count('--reload') == 1
+    assert not profile_banner.exists() and not issue_banner.exists()
+    assert console.read_text() == 'operator console content\n'
+    assert not any('agetty' in line or 'getty@' in line for line in commands.read_text().splitlines())
     assert uploads.read_text().splitlines() == ['attempt']
     assert not any(x.startswith(('restart ', 'kill ', 'start ')) for x in commands.read_text().splitlines())
     (target/'var/lib/ventoy-center/automatic-checks').write_text('boot=boot-one\n')
@@ -90,10 +130,11 @@ with tempfile.TemporaryDirectory() as directory:
     run(script, env=env)
     report = (target/'run/ventoy-install-report.txt').read_text()
     assert 'Acceptance boot: boot-one' in report and 'Current boot: boot-two' in report
-    assert commands.read_text().splitlines().count('--reload') == 2
+    assert not profile_banner.exists() and not issue_banner.exists()
+    assert console.read_text() == 'operator console content\n'
 
-    # Setup completion must refresh the center report without another console
-    # redraw; a failed upload keeps retrying instead of silently losing it.
+    # Setup completion must refresh the center report without console output;
+    # a failed upload keeps retrying instead of silently losing it.
     (target/'var/lib/ventoy-center/manual-init').mkdir()
     (target/'var/lib/ventoy-center/manual-init/status').write_text('verified\n')
     upload_failure.touch()
@@ -102,7 +143,9 @@ with tempfile.TemporaryDirectory() as directory:
     assert commands.read_text().splitlines().count('stop ventoy-install-report.timer') == stops
     upload_failure.unlink()
     run(script, env=env)
-    assert commands.read_text().splitlines().count('--reload') == 2
+    assert not any('agetty' in line or 'getty@' in line for line in commands.read_text().splitlines())
+    assert not profile_banner.exists() and not issue_banner.exists()
+    assert console.read_text() == 'operator console content\n'
     assert uploads.read_text().splitlines() == ['attempt'] * 4
     assert 'Setup result: verified' in (target/'run/ventoy-install-report.txt').read_text()
 
@@ -137,4 +180,4 @@ if len(sys.argv) > 1:
     except RuntimeError: pass
     else: raise AssertionError('small disk accepted')
 
-print('INSTALL_SUPPORT_PASS: cache source integrity, inert hooks, two-boot reports, login redraw and preview tiers')
+print('INSTALL_SUPPORT_PASS: cache source integrity, inert hooks, quiet two-boot reports, legacy banner migration and preview tiers')

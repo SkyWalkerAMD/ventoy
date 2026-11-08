@@ -4,7 +4,7 @@
 
 局域网批量装机管理端。客户端在 BIOS / UEFI 的 Boot 菜单选择网卡，由 **iVentoy / PXE** 加载镜像和自动安装配置；本项目负责目标机器、安装任务、授权、安装包和进度回传。
 
-**当前代码：0.3.0-alpha.55，iVentoy 1.0.49 Pro；Linux CLI 装机优先。** 43 个需要适配的 Linux ISO 已直接内置 E610 驱动，普通手动安装与 PXE 自动安装复用同一成品，并在安装收尾自动持久化驱动。43 个成品的 86 项隔离安装与重启验收通过，物理 E610 验收范围另列。常规无桌面装机使用 Ubuntu Server / live-server、Debian 标准系统与 SSH，以及 CentOS / Rocky / AlmaLinux / RHEL 最小化环境，默认启动到命令行。手动与自动安装均预置含软件分发功能的新版 setup，安装后可直接运行。Windows 保留为次要支持。
+**当前代码：0.3.0-alpha.57，iVentoy 1.0.49 Pro；Linux CLI 装机优先。** 43 个需要适配的 Linux ISO 已直接内置 E610 驱动，普通手动安装与 PXE 自动安装复用同一成品，并在安装收尾自动持久化驱动。43 个成品的 86 项隔离安装与重启验收通过，物理 E610 验收范围另列。常规无桌面装机使用 Ubuntu Server / live-server、Debian 标准系统与 SSH，以及 CentOS / Rocky / AlmaLinux / RHEL 最小化环境，默认启动到命令行。手动与自动安装均预置含软件分发功能的新版 setup，安装后可直接运行。Windows 保留为次要支持。
 
 安装完成后，运行新版 `sudo bash ventoy-linux-setup.run`，会从中心 `software_dir` 自动获取适合本机的 RPM / DEB 并安装或升级。包可直接集中存放，按架构和 EL 版本匹配；同一软件择新、同版本跳过、不降级。中心替换软件后再次执行即可。详见[节点软件分发](docs/deployment/node-software.md)。
 
@@ -20,7 +20,9 @@ E610 的精确内核驱动、ISO 制作工具和逐镜像验证记录见 [E610 I
 
 18 个规划标准版本均完成本轮隔离 QEMU/KVM 自动安装与两次硬盘启动验证。CentOS 7.9、Rocky 8.10、Rocky 9.2 和 Ubuntu Server 22.04.3 另有此前完整物理机验收；Ubuntu Server 24.04.3 已补齐物理 PXE 双盘安装后无人干预的正常硬盘启动，并完成普通 ISO 经真实隔离 iVentoy 的交互手动安装、正常重启、setup 配置和再次重启检查。物理与隔离结果分别记录，不能替代其他硬件或启动模式的验收。具体版本与证据见 [当前进度](docs/development/progress.md)和[现场镜像清单](docs/deployment/image-catalog.md)。
 
-alpha.48 新增首启登录与安装结果报告、原始失败日志、清盘容量预览和安装依赖缓存。完整软件回归与两次启动的实机验收方法见 [安装结果与验收](docs/installation-acceptance.md)；本轮实机验收待用户执行。
+alpha.48 新增安装结果报告、原始失败日志、清盘容量预览和安装依赖缓存。alpha.57 取消启动和登录时的 Ventoy/setup 提示，仍保存本地报告并上传中心；升级 setup 时移除旧版自动生成的提示，保留管理员自定义内容。完整软件回归与两次启动的实机验收方法见 [安装结果与验收](docs/installation-acceptance.md)；本轮实机验收待用户执行。
+
+alpha.57 增加 Debian 13.7 DVD / netinst 入口回归，现场新增 DVD 镜像的驱动与验证范围见 [Debian 13.7 验证记录](docs/development/debian137-2026-11-08.md)。
 
 alpha.52 补充早期 setup 的一次性升级助手，并修复传输后执行权限丢失和校验文件过期的问题；alpha.51 将通用 setup 英文化。alpha.50 增加已有节点 `setup --upgrade`：校验更新后直接应用新版功能，按版本迁移旧配置并保留已有密码、主机名和网络。alpha.49 已增加正式发布与回退、缓存并发与依赖预热、磁盘与备份管理、setup 版本更新以及人工实机验收记录。日常操作请以[当前操作与维护指南](docs/operations.md)为准，历史 PXE-Auto 测试路径不再作为操作入口。
 
