@@ -20,7 +20,7 @@ for unit in cloud-init.service cloud-config.service cloud-final.service ventoy-c
     status=$(systemctl show "$unit" -p ActiveState 2>/dev/null | sed -n 's/^ActiveState=//p')
     [ "$status" != activating ] || initializing=yes
 done
-# A queued cloud-final/bootstrap must also settle before the final redraw.
+# A queued cloud-final/bootstrap must also settle before the final report.
 if systemctl list-jobs --no-legend --no-pager 2>/dev/null | grep -Eq 'cloud-(init|config|final)|ventoy-center-bootstrap'; then initializing=yes; fi
 {
     printf '\nVentoy installation report | %s | %s\n' "$release" "$mode"
@@ -67,28 +67,10 @@ chmod 0644 "$tmp"
 mv -f "$tmp" /run/ventoy-install-report.txt
 cp /run/ventoy-install-report.txt "$state/installation-report.txt"
 chmod 0600 "$state/installation-report.txt"
-# Modern agetty redraws an idle prompt without interrupting a logged-in shell
-# or input already in progress. Older agetty keeps its normal Enter behavior.
-mkdir -p /etc/issue.d
-cp /run/ventoy-install-report.txt /etc/issue.d/90-ventoy.issue
-chmod 0644 /etc/issue.d/90-ventoy.issue
-if [ "$initializing" = no ] && [ "$(cat /run/ventoy-console-report-boot 2>/dev/null || true)" != "$boot" ]; then
-    if agetty --help 2>/dev/null | grep -q -- '--reload'; then
-        agetty --reload || true
-    elif systemctl show getty@tty1.service -p MainPID 2>/dev/null | grep -Eq '^MainPID=[1-9][0-9]*$'; then
-        # EL7 lacks --reload: print once only while tty1 is owned by agetty,
-        # never into an authenticated login shell and never restart getty.
-        pid=$(systemctl show getty@tty1.service -p MainPID | sed -n 's/^MainPID=//p')
-        if [ "$(cat /proc/"$pid"/comm 2>/dev/null || true)" = agetty ]; then
-            cat /run/ventoy-install-report.txt > /dev/tty1 || true
-            printf '\n%s login: ' "$(hostname)" > /dev/tty1 || true
-        fi
-    fi
-    printf '%s\n' "$boot" > /run/ventoy-console-report-boot
-fi
-# Upload changed results after setup too, even after the login prompt was
-# already redrawn. Keep the timer when an upload fails so an early DHCP race
-# cannot silently lose the first-boot result.
+# Keep reports available on disk and in the center without modifying login
+# banners, redrawing getty or writing into an operator's console.
+# Upload changed results after setup too. Keep the timer when an upload fails
+# so an early DHCP race cannot silently lose the first-boot result.
 uploaded=yes
 if [ "$initializing" = no ]; then
     digest=$(sha256sum /run/ventoy-install-report.txt | cut -d ' ' -f 1)
