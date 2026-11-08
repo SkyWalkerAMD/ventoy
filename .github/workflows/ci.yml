@@ -56,6 +56,7 @@ jobs:
           "$RUNNER_TEMP/template-validator/bin/python" scripts/validate_setup_upgrade.py
           "$RUNNER_TEMP/template-validator/bin/python" scripts/validate_setup_preload.py "$RUNNER_TEMP/ventoy-template-fixtures"
           "$RUNNER_TEMP/template-validator/bin/python" scripts/validate_unified_menu.py "$RUNNER_TEMP/ventoy-template-fixtures"
+          "$RUNNER_TEMP/template-validator/bin/python" scripts/validate_uefi_menu_bootstrap.py
           "$RUNNER_TEMP/template-validator/bin/python" scripts/validate_install_support.py "$RUNNER_TEMP/ventoy-template-fixtures"
           for f in internal/center/assets/install-support/*.sh; do sh -n "$f"; done
           for f in internal/center/assets/manual/*.sh; do bash -n "$f"; done
