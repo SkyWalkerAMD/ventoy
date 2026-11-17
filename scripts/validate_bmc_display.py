@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import importlib.util
 import sys
+import struct
 import tempfile
 import unittest
 
@@ -134,6 +135,25 @@ class MenuTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 builder.efi_bytes(path, report.replace('1 1', '2 1'))
 
+    def test_keep_fallback_requires_the_exact_hidden_bios_layout(self):
+        report = ('El Torito boot img : 1 BIOS y none 0x0000 0x00 4 100\n'
+                  'El Torito boot img : 2 UEFI y none 0x0000 0x00 10240 200\n'
+                  'El Torito img path : 2 /images/efiboot.img\n'
+                  'System area summary: MBR cyl-align-off GPT\n')
+        error = 'Cannot enable EL Torito boot image #1 because it is not a data file in the ISO filesystem'
+        self.assertTrue(builder.hidden_bios_keep(report, error))
+        self.assertFalse(builder.hidden_bios_keep(report, 'unrelated error'))
+        for bad in [report + 'El Torito img path : 1 /isolinux/isolinux.bin\n',
+                    report.replace('BIOS', 'UEFI'),
+                    report.replace('/images/efiboot.img', '/other.img'),
+                    report.replace('MBR cyl-align-off GPT', 'MBR')]:
+            with self.subTest(report=bad):
+                try:
+                    allowed = builder.hidden_bios_keep(bad, error)
+                except ValueError:
+                    allowed = False
+                self.assertFalse(allowed)
+
     def test_hybrid_partition_scheme_cannot_silently_disappear(self):
         first = 'System area summary: MBR isohybrid cyl-align-off GPT\n'
         same = 'System area summary: MBR isohybrid GPT\n'
@@ -142,6 +162,22 @@ class MenuTests(unittest.TestCase):
         self.assertNotEqual(builder.system_signature(first), builder.system_signature(lost))
         with self.assertRaises(ValueError):
             builder.system_signature('no system area\n')
+
+    def test_hidden_bios_uses_the_current_menu_directory(self):
+        loader = bytearray(2048)
+        loader[:8] = bytes.fromhex('faea6c7c00009090')
+        struct.pack_into('<4I', loader, 8, 5000, 5500, 2048, 7)
+        struct.pack_into('<I', loader, 64, 7)
+        updated = builder.updated_hidden_bios(bytes(loader), 5500)
+        self.assertEqual(struct.unpack_from('<I', updated, 8)[0], 16)
+        self.assertEqual(updated[:8], loader[:8])
+        self.assertEqual(updated[12:], loader[12:])
+        for offset in (0, 16, 20, 64):
+            bad = bytearray(loader); bad[offset] ^= 255
+            with self.subTest(offset=offset), self.assertRaises(ValueError):
+                builder.updated_hidden_bios(bytes(bad), 5500)
+        with self.assertRaises(ValueError):
+            builder.updated_hidden_bios(bytes(loader), 5501)
 
 
 if __name__ == '__main__':

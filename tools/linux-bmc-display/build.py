@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shlex
 import shutil
+import struct
 import subprocess
 
 from menus import menu_kind, patch_checksums, patch_config, patch_treeinfo
@@ -71,6 +72,32 @@ def system_signature(text):
         raise ValueError('missing hybrid partition information')
     return {word for word in match[1].split()
             if word in ('MBR', 'GPT', 'APM', 'isohybrid', 'grub2-mbr')}
+
+
+def hidden_bios_keep(text, error):
+    """Keep existing extents only for the reviewed hidden-BIOS replay failure."""
+    record = boot_records(text)
+    return ("because it is not a data file in the ISO filesystem" in error and
+            [row[1] for row in record['images']] == ['BIOS', 'UEFI'] and
+            record['images'][0][2:7] == ['y', 'none', '0x0000', '0x00', '4'] and
+            not any(row[0] == '1' for row in record['paths']) and
+            ['2', '/images/efiboot.img'] in record['paths'] and
+            system_signature(text) == {'MBR', 'GPT'})
+
+
+def updated_hidden_bios(data, lba):
+    """Point the existing ISOLINUX boot-info table at the new primary PVD."""
+    if data[:8] != bytes.fromhex('faea6c7c00009090') or len(data) < 64:
+        raise ValueError('unreviewed hidden BIOS loader')
+    pvd, boot, size, checksum = struct.unpack_from('<4I', data, 8)
+    if not pvd or boot != lba or not 64 <= size <= len(data) or size % 4:
+        raise ValueError('invalid hidden BIOS boot-info table')
+    actual = sum(struct.unpack('<%dI' % ((size - 64) // 4), data[64:size])) & 0xffffffff
+    if checksum != actual:
+        raise ValueError('hidden BIOS boot-info checksum mismatch')
+    updated = bytearray(data)
+    struct.pack_into('<I', updated, 8, 16)
+    return bytes(updated)
 
 
 def efi_bytes(iso, text):
@@ -281,7 +308,36 @@ def build(args):
     grown = run(['xorriso', '-abort_on', 'FAILURE', '-dev', candidate] + maps +
                 ['-boot_image', 'any', 'replay', '-commit', '-end'], optional=True)
     storage = 'reflink-grow'
-    if grown.returncode:
+    if grown.returncode and hidden_bios_keep(original_report, grown.stderr):
+        candidate.rename(output / 'failed-grow.iso.partial')
+        run(['cp', '--reflink=always', '--no-clobber', source, candidate])
+        # A hidden BIOS loader has no tree path for replay. Keep its original
+        # extents and the existing hybrid system area while appending menus.
+        run(['xorriso', '-abort_on', 'FAILURE', '-dev', candidate] + maps +
+            ['-boot_image', 'any', 'keep', '-commit', '-end'])
+        storage = 'reflink-grow-kept-hidden-bios'
+        bios = boot_records(original_report)['images'][0]
+        with source.open('rb') as left, candidate.open('rb') as right:
+            if left.read(32768) != right.read(32768):
+                raise ValueError('kept hybrid system area changed')
+            left.seek(int(bios[7]) * 2048); right.seek(int(bios[7]) * 2048)
+            original_bios = left.read(65536)
+            if original_bios != right.read(65536):
+                raise ValueError('kept hidden BIOS extent changed')
+        # ISOLINUX's table can refer to a previous session PVD. Keeping it
+        # verbatim would silently boot the old menus, despite correct ISO files.
+        updated_bios = updated_hidden_bios(original_bios, int(bios[7]))
+        with candidate.open('r+b') as stream:
+            stream.seek(16 * 2048)
+            if stream.read(7) != b'\x01CD001\x01':
+                raise ValueError('candidate primary PVD is missing')
+            stream.seek(int(bios[7]) * 2048)
+            stream.write(updated_bios)
+            stream.flush(); os.fsync(stream.fileno())
+            stream.seek(int(bios[7]) * 2048)
+            if stream.read(len(updated_bios)) != updated_bios:
+                raise ValueError('hidden BIOS boot-info readback differs')
+    elif grown.returncode:
         if not args.allow_full_repack or 'Overlapping GPT entries requested' not in grown.stderr:
             raise ValueError('candidate growth failed; inspect build.log')
         if shutil.disk_usage(output).free < initial.st_size + 2 * 1024**3:
