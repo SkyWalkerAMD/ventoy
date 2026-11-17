@@ -73,7 +73,7 @@ def menu_kind(path):
     if path.suffix != '.cfg':
         return None
     text = path.as_posix()
-    if text.startswith(('/boot/grub/', '/EFI/')):
+    if text.startswith(('/boot/grub/', '/boot/grub2/', '/EFI/')):
         return 'grub'
     if text.startswith(('/isolinux/', '/syslinux/')):
         return 'syslinux'
