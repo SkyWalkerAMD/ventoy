@@ -117,10 +117,6 @@ def compatibility_choices(original, kind):
         params = re.search(r'(?im)^[ \t]*append[ \t]+([^\n]+)$', primary[1])
         if not kernel or not KERNEL.search(kernel[1]) or not params or PARAMETER in params[1].split():
             raise ValueError('expected a normal Syslinux install entry')
-        if re.search(r'(?im)^default[ \t]+live[ \t]*$', text) and not re.search(r'(?im)^ui[ \t]', text):
-            # Ubuntu's legacy menu already ships vesamenu.c32. Use it so the
-            # two labels can be selected with the keyboard as well as typed.
-            text = 'ui vesamenu.c32\n' + text
         clones = [
             f'label ventoy-bmc-{mode}\n  menu label {title}\n'
             f'  kernel {kernel[1]}\n  append {insert_parameter(params[1], f"{PARAMETER} ventoy.bmc={mode}")}\n'
