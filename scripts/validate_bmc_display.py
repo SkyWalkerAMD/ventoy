@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import importlib.util
 import sys
+import struct
 import tempfile
 import unittest
 
@@ -161,6 +162,22 @@ class MenuTests(unittest.TestCase):
         self.assertNotEqual(builder.system_signature(first), builder.system_signature(lost))
         with self.assertRaises(ValueError):
             builder.system_signature('no system area\n')
+
+    def test_hidden_bios_uses_the_current_menu_directory(self):
+        loader = bytearray(2048)
+        loader[:8] = bytes.fromhex('faea6c7c00009090')
+        struct.pack_into('<4I', loader, 8, 5000, 5500, 2048, 7)
+        struct.pack_into('<I', loader, 64, 7)
+        updated = builder.updated_hidden_bios(bytes(loader), 5500)
+        self.assertEqual(struct.unpack_from('<I', updated, 8)[0], 16)
+        self.assertEqual(updated[:8], loader[:8])
+        self.assertEqual(updated[12:], loader[12:])
+        for offset in (0, 16, 20, 64):
+            bad = bytearray(loader); bad[offset] ^= 255
+            with self.subTest(offset=offset), self.assertRaises(ValueError):
+                builder.updated_hidden_bios(bytes(bad), 5500)
+        with self.assertRaises(ValueError):
+            builder.updated_hidden_bios(bytes(loader), 5501)
 
 
 if __name__ == '__main__':

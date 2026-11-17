@@ -53,7 +53,10 @@ and never publishes a partial image.
 
 For the recognized hidden-BIOS/visible-EFI hybrid layout, a replay failure can
 instead use xorriso's `keep` mode on a fresh reflink. It verifies the original
-system area and hidden BIOS bytes are unchanged. This preserves the existing
+system area and hidden BIOS bytes before updating only the validated ISOLINUX
+boot-info table's PVD reference. Otherwise a loader from a previous ISO session
+would continue to read old menus. The payload checksum stays unchanged.
+This preserves the existing
 partition geometry while appending the ISO session; it does not repair or
 expand an existing hybrid partition table. BIOS and UEFI boot checks are
 required before publishing such a candidate.
