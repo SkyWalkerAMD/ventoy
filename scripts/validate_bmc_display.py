@@ -37,7 +37,7 @@ class TargetPolicyTests(unittest.TestCase):
                 boot = root / 'boot/grub'
                 boot.mkdir(parents=True)
                 (boot / 'grub.cfg').touch()
-                fake = r'''update-grub() {
+                fake = r'''update_grub() {
     . /etc/default/grub
     for conf in /etc/default/grub.d/*.cfg; do [ ! -f "$conf" ] || . "$conf"; done
     printf 'linux /boot/vmlinuz-test %s %s\n' "$GRUB_CMDLINE_LINUX" \
@@ -45,6 +45,7 @@ class TargetPolicyTests(unittest.TestCase):
 }
 '''
                 body = script.replace('command -v grubby >/dev/null 2>&1', 'false')
+                body = body.replace('    update-grub\n', '    update_grub\n')
                 sandbox = (fake + body).replace('/etc/default', str(defaults))
                 # Replace only the menu location, not vmlinuz inside it.
                 sandbox = sandbox.replace('/boot/grub/grub.cfg', str(boot / 'grub.cfg'))
