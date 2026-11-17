@@ -73,6 +73,17 @@ def system_signature(text):
             if word in ('MBR', 'GPT', 'APM', 'isohybrid', 'grub2-mbr')}
 
 
+def hidden_bios_keep(text, error):
+    """Keep existing extents only for the reviewed hidden-BIOS replay failure."""
+    record = boot_records(text)
+    return ("because it is not a data file in the ISO filesystem" in error and
+            [row[1] for row in record['images']] == ['BIOS', 'UEFI'] and
+            record['images'][0][2:7] == ['y', 'none', '0x0000', '0x00', '4'] and
+            not any(row[0] == '1' for row in record['paths']) and
+            ['2', '/images/efiboot.img'] in record['paths'] and
+            system_signature(text) == {'MBR', 'GPT'})
+
+
 def efi_bytes(iso, text):
     row = next(r for r in boot_records(text)['images'] if r[1] == 'UEFI')
     length, offset = int(row[6]) * 512, int(row[7]) * 2048
@@ -281,7 +292,22 @@ def build(args):
     grown = run(['xorriso', '-abort_on', 'FAILURE', '-dev', candidate] + maps +
                 ['-boot_image', 'any', 'replay', '-commit', '-end'], optional=True)
     storage = 'reflink-grow'
-    if grown.returncode:
+    if grown.returncode and hidden_bios_keep(original_report, grown.stderr):
+        candidate.rename(output / 'failed-grow.iso.partial')
+        run(['cp', '--reflink=always', '--no-clobber', source, candidate])
+        # A hidden BIOS loader has no tree path for replay. Keep its original
+        # extents and the existing hybrid system area while appending menus.
+        run(['xorriso', '-abort_on', 'FAILURE', '-dev', candidate] + maps +
+            ['-boot_image', 'any', 'keep', '-commit', '-end'])
+        storage = 'reflink-grow-kept-hidden-bios'
+        bios = boot_records(original_report)['images'][0]
+        with source.open('rb') as left, candidate.open('rb') as right:
+            if left.read(32768) != right.read(32768):
+                raise ValueError('kept hybrid system area changed')
+            left.seek(int(bios[7]) * 2048); right.seek(int(bios[7]) * 2048)
+            if left.read(65536) != right.read(65536):
+                raise ValueError('kept hidden BIOS extent changed')
+    elif grown.returncode:
         if not args.allow_full_repack or 'Overlapping GPT entries requested' not in grown.stderr:
             raise ValueError('candidate growth failed; inspect build.log')
         if shutil.disk_usage(output).free < initial.st_size + 2 * 1024**3:

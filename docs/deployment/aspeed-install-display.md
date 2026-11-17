@@ -51,6 +51,13 @@ whose appended EFI partition prevents growth, `--allow-full-repack` permits an
 explicit full rebuild after a free-space check. Failure leaves private evidence
 and never publishes a partial image.
 
+For the recognized hidden-BIOS/visible-EFI hybrid layout, a replay failure can
+instead use xorriso's `keep` mode on a fresh reflink. It verifies the original
+system area and hidden BIOS bytes are unchanged. This preserves the existing
+partition geometry while appending the ISO session; it does not repair or
+expand an existing hybrid partition table. BIOS and UEFI boot checks are
+required before publishing such a candidate.
+
 The builder verifies GRUB syntax, changed-file readback, media checksums, the
 ISO file inventory, volume label, El Torito boot loading parameters, EFI extent,
 EFI executable contents and retained kernel/initrd/driver files. It records
