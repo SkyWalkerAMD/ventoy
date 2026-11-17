@@ -1,5 +1,13 @@
 # 开发记录
 
+## 0.3.0-alpha.59 — 2026-11-17
+
+- Avoid reloading networkd when a Netplan DHCP profile is unchanged and already
+  loaded. An unplugged secondary NIC no longer triggers repeated global reloads
+  during setup/upgrade; connected interfaces without a lease still retry locally.
+- Verify unchanged disconnected profiles, failed loads and retry behavior in the
+  DHCP regression fixtures. A changed or unloaded profile still gets loaded.
+
 ## 0.3.0-alpha.58 — 2026-11-08
 
 - Fix setup verification on Ubuntu systems using SSH socket activation: prepare the privilege separation directory safely and accept a healthy listening SSH socket before the first connection starts the daemon.

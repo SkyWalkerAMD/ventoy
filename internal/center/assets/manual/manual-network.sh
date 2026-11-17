@@ -15,7 +15,7 @@ _si_python_select
 _si_backend
 _si_ssh_devices
 activate() {
-    local nic=$1 target temp filename uuid
+    local nic=$1 target temp filename uuid loaded
     case "$SI_BACKEND" in
         nm)
             uuid=$(nmcli -t -f connection.uuid connection show "safe-dhcp-$nic" | cut -d: -f2-)
@@ -30,6 +30,17 @@ activate() {
             if [[ $SI_RENDERER == networkd ]]; then
                 filename=10-netplan-$nic.network
                 [[ -f "$temp/run/systemd/network/$filename" ]] || { rm -rf "$temp"; return 1; }
+                loaded=$(networkctl --no-pager status "$nic" 2>/dev/null | sed -n 's/^[[:space:]]*Network File: //p') || loaded=
+                # A saved, already loaded profile needs no global reload on
+                # reruns. In particular, an unplugged secondary NIC must not
+                # disturb the DHCP lease used to download setup/software.
+                if cmp -s "$temp/run/systemd/network/$filename" "/run/systemd/network/$filename" &&
+                   [[ $loaded == "/run/systemd/network/$filename" ]]; then
+                    if [[ $(cat "/sys/class/net/$nic/carrier" 2>/dev/null || true) == 1 ]]; then
+                        networkctl reconfigure "$nic" || { rm -rf "$temp"; return 1; }
+                    fi
+                    rm -rf "$temp"; return 0
+                fi
                 if ! install -d -m 0755 /run/systemd/network ||
                    ! install -m 0644 "$temp/run/systemd/network/$filename" "/run/systemd/network/$filename" ||
                    ! networkctl reload || ! networkctl reconfigure "$nic"; then rm -rf "$temp"; return 1; fi
