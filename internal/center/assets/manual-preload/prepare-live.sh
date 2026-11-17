@@ -10,7 +10,7 @@ src=$(CDPATH= cd -- "$src" && pwd)
 [ "$root" != / ] && [ -f "$root/etc/os-release" ] || exit 1
 mkdir -p "$root/usr/local/lib/ventoy-preload"
 dest=$root/usr/local/lib/ventoy-preload
-for name in ventoy-linux-setup.run setup.sha256 copy-to-target.sh README.txt software-README.txt subiquity-launch.sh subiquity-legacy.py subiquity-desktop.sh finish-subiquity ubuntu-reboot.sh linux-update-policy.sh target-update-policy.sh ubuntu-kernel.py manual-ubuntu-policy.py; do
+for name in ventoy-linux-setup.run setup.sha256 copy-to-target.sh bmc-display-target.sh README.txt software-README.txt subiquity-launch.sh subiquity-legacy.py subiquity-desktop.sh finish-subiquity ubuntu-reboot.sh linux-update-policy.sh target-update-policy.sh ubuntu-kernel.py manual-ubuntu-policy.py; do
     cp -p "$src/$name" "$dest/$name"
 done
 if [ -f "$src/support-cache.sh" ]; then /bin/sh "$src/support-cache.sh" "$root"; fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an unpublished Linux ISO with nomodeset on its installer entries.
+"""Build an unpublished Linux ISO with optional AST/BMC installer entries.
 
 The source is read-only. Existing kernel/initrd payloads, boot entry order and
 installation arguments are preserved. No client disk or server is changed.
@@ -15,7 +15,7 @@ import shutil
 import struct
 import subprocess
 
-from menus import menu_kind, patch_checksums, patch_config, patch_treeinfo
+from menus import compatibility_choices, menu_kind, patch_checksums, patch_treeinfo
 
 
 def digest(path):
@@ -230,7 +230,7 @@ def build(args):
         original = before / name.lstrip('/')
         extract(source, name, original)
         data = original.read_bytes()
-        updated, counts = patch_config(data, kind)
+        updated, counts = compatibility_choices(data, kind)
         stats[name] = counts
         if updated != data:
             changes[name] = (data, updated)
@@ -239,10 +239,8 @@ def build(args):
                 check.parent.mkdir(parents=True, exist_ok=True)
                 check.write_bytes(updated)
                 run([checker, check])
-    if not sum(row['matched'] for row in stats.values()):
-        raise ValueError('no recognized Linux installer commands')
-    if not changes:
-        raise ValueError('all installer entries already have nomodeset')
+    if not sum(row['entries_added'] for row in stats.values()):
+        raise ValueError('no recognized primary Linux installer entries')
 
     efi_before = output / 'original-efi.img'
     efi_before.write_bytes(efi_bytes(source, original_report))
@@ -253,7 +251,7 @@ def build(args):
     for name, path in fat_before.items():
         if name.lower().endswith('/grub.cfg'):
             data = path.read_bytes()
-            updated, counts = patch_config(data, 'grub')
+            updated, _ = compatibility_choices(data, 'grub')
             if updated != data:
                 replacement = output / ('fat-menu-' + str(len(fat_updates)))
                 replacement.write_bytes(updated)
@@ -399,7 +397,7 @@ def build(args):
     candidate.rename(final)
     result = {'status': 'built-not-published', 'source_sha256': args.source_sha256,
               'candidate_sha256': digest(final), 'candidate_size': final.stat().st_size,
-              'parameter': 'nomodeset', 'storage': storage, 'menus': stats,
+              'display_policy': 'normal-default-optional-ast-bmc', 'storage': storage, 'menus': stats,
               'changed_files': sorted(changes), 'efi_menu_changes': sorted(fat_updates),
               'preserved_files': preserved, 'el_torito': signature,
               'physical_ast2500': 'not-tested', 'physical_ast2600': 'not-tested'}

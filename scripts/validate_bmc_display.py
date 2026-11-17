@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 import sys
 import struct
+import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -16,8 +18,76 @@ spec = importlib.util.spec_from_file_location('bmc_build', ROOT / 'tools/linux-b
 builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
 
+POLICY = ROOT / 'internal/center/assets/manual-preload/bmc-display-target.sh'
+
+
+@unittest.skipUnless(shutil.which('sh') and sys.platform.startswith('linux'), 'requires Linux shell tools')
+class TargetPolicyTests(unittest.TestCase):
+    def test_explicit_policy_on_disposable_grub_configurations(self):
+        # Run the chroot body with paths scoped to a fixture. A fake update-grub
+        # reads the real edited defaults and emits a kernel command to verify.
+        script = POLICY.read_text().split("<<'VCBMC'\n", 1)[1].split('\nVCBMC\n', 1)[0]
+        for mode in ('install', 'installed'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                defaults = root / 'etc/default'
+                defaults.mkdir(parents=True)
+                (defaults / 'grub').write_text('GRUB_CMDLINE_LINUX="rootfixed nomodeset nomodeset"\n'
+                                              'GRUB_CMDLINE_LINUX_DEFAULT="nomodeset quiet unrelated=nomodeset"\n')
+                boot = root / 'boot/grub'
+                boot.mkdir(parents=True)
+                (boot / 'grub.cfg').touch()
+                fake = r'''update-grub() {
+    . /etc/default/grub
+    for conf in /etc/default/grub.d/*.cfg; do [ ! -f "$conf" ] || . "$conf"; done
+    printf 'linux /boot/vmlinuz-test %s %s\n' "$GRUB_CMDLINE_LINUX" \
+      "$GRUB_CMDLINE_LINUX_DEFAULT" > /boot/grub/grub.cfg
+}
+'''
+                body = script.replace('command -v grubby >/dev/null 2>&1', 'false')
+                sandbox = (fake + body).replace('/etc/default', str(defaults))
+                # Replace only the menu location, not vmlinuz inside it.
+                sandbox = sandbox.replace('/boot/grub/grub.cfg', str(boot / 'grub.cfg'))
+                for _ in range(2):
+                    subprocess.run(['sh', '-s', '--', mode], input=sandbox, text=True, check=True)
+                actual = (boot / 'grub.cfg').read_text().split()
+                self.assertEqual(actual.count('nomodeset'), int(mode == 'installed'))
+                self.assertIn('rootfixed', actual)
+                self.assertIn('quiet', actual)
+                self.assertIn('unrelated=nomodeset', actual)
+                self.assertEqual((defaults / 'grub.d/zz-ventoy-bmc-display.cfg').exists(),
+                                 mode == 'installed')
+
 
 class MenuTests(unittest.TestCase):
+    def test_ast_grub_choices_leave_normal_and_fallback_entries_intact(self):
+        original = (b'set default=0\nmenuentry "Graphical install" {\n'
+                    b' linux /install.amd/vmlinuz --- quiet\n initrd /install.amd/gtk/initrd.gz\n}\n'
+                    b'menuentry "Install" {\n linux /install.amd/vmlinuz --- quiet\n'
+                    b' initrd /install.amd/initrd.gz\n}\n'
+                    b'menuentry "Safe graphics" {\n linux /install.amd/vmlinuz nomodeset ---\n'
+                    b' initrd /install.amd/gtk/initrd.gz\n}\n')
+        result, stats = menus.compatibility_choices(original, 'grub')
+        self.assertEqual(stats['entries_added'], 2)
+        self.assertTrue(result.startswith(original))
+        appended = result[len(original):]
+        self.assertNotIn(b'/gtk/', appended)
+        self.assertIn(b'nomodeset ventoy.bmc=install --- quiet', appended)
+        self.assertIn(b'nomodeset ventoy.bmc=installed --- quiet', appended)
+
+    def test_ast_syslinux_choices_are_selectable_and_keep_the_media_default(self):
+        original = (b'default check\nlabel linux\n menu label Install\n kernel vmlinuz\n'
+                    b' append initrd=initrd.img quiet\nlabel check\n menu default\n'
+                    b' kernel vmlinuz\n append initrd=initrd.img rd.live.check quiet\n'
+                    b'menu begin Troubleshooting\nlabel rescue\n kernel vmlinuz\n'
+                    b' append initrd=initrd.img rescue\nmenu end\n')
+        result, stats = menus.compatibility_choices(original, 'syslinux')
+        self.assertEqual(stats['entries_added'], 2)
+        self.assertTrue(result.startswith(original))
+        self.assertEqual(result.count(b'menu default'), 1)
+        self.assertIn(b'append initrd=initrd.img quiet nomodeset ventoy.bmc=install\n', result)
+        self.assertNotIn(b'rescue nomodeset', result)
+
     def test_el10_bios_grub2_directory_is_an_installer_menu(self):
         for name in ['/boot/grub2/grub.cfg', '/boot/grub/grub.cfg', '/EFI/BOOT/grub.cfg']:
             self.assertEqual(menus.menu_kind(name), 'grub')
