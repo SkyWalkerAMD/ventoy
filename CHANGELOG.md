@@ -1,5 +1,11 @@
 # 开发记录
 
+## 0.3.0-alpha.60 — 2026-11-18
+
+- Keep normal Linux PXE startup as the default. Offer AST/BMC display
+  compatibility for the installer only or for the installer and installed
+  system, using the same media for manual and automatic installation.
+
 ## 0.3.0-alpha.59 — 2026-11-17
 
 - Add a verified Linux media builder for ASPEED BMC display compatibility. Apply

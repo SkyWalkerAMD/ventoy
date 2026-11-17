@@ -46,6 +46,7 @@ func TestManualPreloadPackage(t *testing.T) {
 		"usr/lib/finish-install.d/93ventoy-manual-preload",
 		"usr/lib/post-base-installer.d/93ventoy-update-policy",
 		"ventoy-manual-preload/linux-update-policy.sh",
+		"ventoy-manual-preload/bmc-display-target.sh",
 		"ventoy-manual-preload/ubuntu-kernel.py",
 		"ventoy-manual-preload/finish-anaconda.ks",
 		"ventoy-manual-preload/finish-subiquity",

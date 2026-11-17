@@ -5,31 +5,29 @@ the installer starts can be caused by a kernel modesetting transition. It is
 different from a GRUB `can't allocate initrd` error, a network driver failure,
 or an installer crash. The correct kernel argument is `nomodeset`.
 
-The Linux installation media can enable `nomodeset` on existing installer boot
-commands with `tools/linux-bmc-display/build.py`. It changes the shared ISO used
-by manual and automatic installation; changing only an automatic-install
-preload would run too late to protect early display initialization.
+After choosing manual or automatic installation in iVentoy, use the regular
+installer entry for normal graphics. Select **AST/BMC display compatibility
+(install only)** if the BMC console goes blank. Select **AST/BMC display
+compatibility (keep after install)** when the installed system also needs the
+firmware display. Narrow menus shorten these labels to **AST/BMC (install
+only)** and **AST/BMC (keep after install)**. Both choices use `nomodeset`
+while starting the installer.
+Use a matching Ventoy Center preload to apply the selected policy before the
+installed system boots.
 
 The builder covers GRUB `linux`, `linuxefi` and `linux16` commands in both
 `/boot/grub` and `/boot/grub2`, EFI menus, and Syslinux
 installer `append` lines. It also checks the separate FAT EFI boot image and
-updates any installer menu stored there. Existing basic-graphics entries remain
-unchanged when they already contain the argument. Kernel paths, initrd paths,
-installation arguments, menu order, defaults and the Ubuntu TPM compatibility
-entry remain intact. Windows and memory-test media are outside this tool's scope.
+updates any installer menu stored there. The two choices use the standard
+installer kernel and initrd. Debian uses its text installer for these choices.
+Existing entries and their order, including the distribution's safe graphics
+and Ubuntu's TPM compatibility entries, are preserved.
 
-`nomodeset` keeps the firmware display instead of enabling accelerated kernel
-graphics. This is a compatibility default for installation on BMC consoles;
-it is not automatic detection of an ASPEED PCI device. To test native graphics
-for one boot, remove the argument with GRUB **e**, or Syslinux **Tab**, before
-starting the selected installer. A machine that needs accelerated desktop
-graphics may require a different policy after installation.
-
-For Debian/Ubuntu the inserted argument precedes `---` or `--`, rather than
-requesting it as an additional installed-system boot option. Other installers
-may carry boot arguments into the installed system. Check the installed
-`/proc/cmdline` before changing its display policy; the builder does not edit
-the installed system's GRUB configuration.
+`nomodeset` keeps the firmware display and disables native display modesetting.
+Select compatibility based on what happens on the console. The installer
+completion hook removes inherited `nomodeset` for **install only** and ensures
+it is present for **keep after install**. Verify the installed system's
+`/proc/cmdline` after reboot.
 
 ## Build and verification
 
@@ -45,8 +43,12 @@ python3 tools/linux-bmc-display/build.py \
   --output /srv/staging/linux-bmc-display
 ```
 
-The output directory must not already exist. Sources are never modified. The
-initial candidate is a reflink, not a hard link. For inspected GRUB hybrid media
+The output directory must not already exist. Use source media from before the
+global `nomodeset` change. Verified rollback originals can be used when
+replacing a previously published image. The matching production preloads must
+include `bmc-display-target.sh`.
+
+The initial candidate is a reflink. For inspected GRUB hybrid media
 whose appended EFI partition prevents growth, `--allow-full-repack` permits an
 explicit full rebuild after a free-space check. Failure leaves private evidence
 and never publishes a partial image.
