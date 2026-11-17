@@ -10,7 +10,8 @@ commands with `tools/linux-bmc-display/build.py`. It changes the shared ISO used
 by manual and automatic installation; changing only an automatic-install
 preload would run too late to protect early display initialization.
 
-The builder covers GRUB `linux`, `linuxefi` and `linux16` commands, and Syslinux
+The builder covers GRUB `linux`, `linuxefi` and `linux16` commands in both
+`/boot/grub` and `/boot/grub2`, EFI menus, and Syslinux
 installer `append` lines. It also checks the separate FAT EFI boot image and
 updates any installer menu stored there. Existing basic-graphics entries remain
 unchanged when they already contain the argument. Kernel paths, initrd paths,

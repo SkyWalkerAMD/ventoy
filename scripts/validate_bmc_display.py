@@ -17,6 +17,11 @@ spec.loader.exec_module(builder)
 
 
 class MenuTests(unittest.TestCase):
+    def test_el10_bios_grub2_directory_is_an_installer_menu(self):
+        for name in ['/boot/grub2/grub.cfg', '/boot/grub/grub.cfg', '/EFI/BOOT/grub.cfg']:
+            self.assertEqual(menus.menu_kind(name), 'grub')
+        self.assertIsNone(menus.menu_kind('/boot/grub2-unrelated/grub.cfg'))
+
     def test_grub_all_install_modes_keep_boot_paths_and_defaults(self):
         original = (b'set default="1"\nset timeout=60\n'
                     b'menuentry "Install" {\n'
@@ -67,6 +72,8 @@ class MenuTests(unittest.TestCase):
                      'linux /casper/vmlinuz quiet # comment\n',
                      'linux /casper/vmlinuz quiet \\\n',
                      'linux /casper/vmlinuz nomodeset=0\n',
+                     'linux /casper/vmlinuz quiet # nomodeset\n',
+                     'linux /casper/vmlinuz nomodeset modeset=1\n',
                      'linux /casper/vmlinuz\r\n']:
             with self.subTest(text=text), self.assertRaises(ValueError):
                 menus.patch_config(text.encode(), 'grub')

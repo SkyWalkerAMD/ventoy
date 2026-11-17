@@ -14,13 +14,13 @@ def insert_parameter(arguments):
     # Insert before Debian/Ubuntu's --- separator so this additional option is
     # not intentionally requested as an installed-system bootloader setting.
     # Keeping all existing bytes also preserves escaped volume labels.
-    words = arguments.split()
-    if PARAMETER in words:
-        return arguments
-    if any(w.startswith(('nomodeset=', 'modeset=')) for w in words):
-        raise ValueError('conflicting display parameter requires review')
     if any(c in arguments for c in ('\n', '\r', ';', '#', '`')) or arguments.rstrip().endswith('\\'):
         raise ValueError('unsupported compound or continued boot command')
+    words = arguments.split()
+    if any(w.startswith(('nomodeset=', 'modeset=')) for w in words):
+        raise ValueError('conflicting display parameter requires review')
+    if PARAMETER in words:
+        return arguments
     separator = re.search(r'(?<!\S)(?:---|--)(?!\S)', arguments)
     if separator:
         pos = separator.start()
@@ -73,7 +73,7 @@ def menu_kind(path):
     if path.suffix != '.cfg':
         return None
     text = path.as_posix()
-    if text.startswith(('/boot/grub/', '/EFI/')):
+    if text.startswith(('/boot/grub/', '/boot/grub2/', '/EFI/')):
         return 'grub'
     if text.startswith(('/isolinux/', '/syslinux/')):
         return 'syslinux'
