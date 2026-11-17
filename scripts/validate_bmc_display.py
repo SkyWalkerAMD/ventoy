@@ -72,6 +72,8 @@ class MenuTests(unittest.TestCase):
                      'linux /casper/vmlinuz quiet # comment\n',
                      'linux /casper/vmlinuz quiet \\\n',
                      'linux /casper/vmlinuz nomodeset=0\n',
+                     'linux /casper/vmlinuz quiet # nomodeset\n',
+                     'linux /casper/vmlinuz nomodeset modeset=1\n',
                      'linux /casper/vmlinuz\r\n']:
             with self.subTest(text=text), self.assertRaises(ValueError):
                 menus.patch_config(text.encode(), 'grub')
