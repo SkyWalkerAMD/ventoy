@@ -9,6 +9,10 @@ CHOICES = (
     ('install', 'AST/BMC display compatibility (install only)'),
     ('installed', 'AST/BMC display compatibility (keep after install)'),
 )
+COMPACT_CHOICES = (
+    ('install', 'AST/BMC (install only)'),
+    ('installed', 'AST/BMC (keep after install)'),
+)
 KERNEL = re.compile(r'(?:^|/)(?:hwe-)?vmlinuz(?:[-.][A-Za-z0-9._+-]+)?$')
 GRUB = re.compile(r'^(\s*(?:linux|linuxefi|linux16)\s+)(\S+)(.*)$')
 APPEND = re.compile(r'^(\s*append\s+)(.*)$', re.IGNORECASE)
@@ -103,8 +107,9 @@ def compatibility_choices(original, kind):
         if not entries:
             return original, {'entries_added': 0}
         _, body, kernel = min(entries, key=lambda entry: entry[0])
+        choices = COMPACT_CHOICES if kernel[2].startswith('/install.amd/') else CHOICES
         clones = []
-        for mode, title in CHOICES:
+        for mode, title in choices:
             cmd = kernel[1] + kernel[2] + insert_parameter(kernel[3], f'{PARAMETER} ventoy.bmc={mode}')
             clones.append(f"menuentry '{title}' --id ventoy-bmc-{mode} {{\n" +
                           body.replace(kernel[0] + '\n', cmd + '\n', 1) + '}\n')
@@ -117,10 +122,12 @@ def compatibility_choices(original, kind):
         params = re.search(r'(?im)^[ \t]*append[ \t]+([^\n]+)$', primary[1])
         if not kernel or not KERNEL.search(kernel[1]) or not params or PARAMETER in params[1].split():
             raise ValueError('expected a normal Syslinux install entry')
+        narrow_menu = kernel[1].startswith('/install.amd/') or kernel[1].startswith('/casper/')
+        choices = COMPACT_CHOICES if narrow_menu else CHOICES
         clones = [
             f'label ventoy-bmc-{mode}\n  menu label {title}\n'
             f'  kernel {kernel[1]}\n  append {insert_parameter(params[1], f"{PARAMETER} ventoy.bmc={mode}")}\n'
-            for mode, title in CHOICES
+            for mode, title in choices
         ]
     return (text.rstrip('\n') + '\n\n' + '\n'.join(clones)).encode(), {'entries_added': len(clones)}
 

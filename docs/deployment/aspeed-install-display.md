@@ -9,7 +9,9 @@ After choosing manual or automatic installation in iVentoy, use the regular
 installer entry for normal graphics. Select **AST/BMC display compatibility
 (install only)** if the BMC console goes blank. Select **AST/BMC display
 compatibility (keep after install)** when the installed system also needs the
-firmware display. Both choices use `nomodeset` while starting the installer.
+firmware display. Narrow menus shorten these labels to **AST/BMC (install
+only)** and **AST/BMC (keep after install)**. Both choices use `nomodeset`
+while starting the installer.
 Use a matching Ventoy Center preload to apply the selected policy before the
 installed system boots.
 
