@@ -2,6 +2,9 @@
 
 ## 0.3.0-alpha.59 — 2026-11-17
 
+- Add a verified Linux media builder for ASPEED BMC display compatibility. Apply
+  `nomodeset` to installer menus in GRUB, Syslinux and embedded EFI filesystems,
+  retaining shared manual/automatic media and existing TPM fallback entries.
 - Avoid reloading networkd when a Netplan DHCP profile is unchanged and already
   loaded. An unplugged secondary NIC no longer triggers repeated global reloads
   during setup/upgrade; connected interfaces without a lease still retry locally.
