@@ -45,6 +45,11 @@ mkdir -p "$3/run/systemd/network" "$3/run/NetworkManager/system-connections"
 printf '[Match]\\nName=eth1\\n[Network]\\nDHCP=ipv4\\n' > "$3/run/systemd/network/10-netplan-eth1.network"
 printf '[connection]\\nid=netplan-eth1\\nuuid=fixture-uuid\\n' > "$3/run/NetworkManager/system-connections/netplan-eth1.nmconnection"''',
                     'networkctl': '''printf 'networkctl %s\\n' "$*" >> "$ROOT/events"
+if [ "$1" = --no-pager ]; then
+    [ -f "$ROOT/active" ] || exit 1
+    printf '                Network File: %s/run/systemd/network/10-netplan-eth1.network\\n' "$ROOT"
+    exit 0
+fi
 case "$SCENARIO:$1" in load-failed*:reload) exit 1;; esac
 if [ "$1" = reconfigure ]; then
     [ "$SCENARIO" != activation-failed ] || exit 1
@@ -79,6 +84,21 @@ touch "$ROOT/active"''',
                 assert 'eth0' not in events, events
                 if success:
                     assert (root / 'active').exists(), (renderer, scenario, 'saved DHCP was never loaded', result.stdout)
+                    if scenario == 'late-carrier' and renderer == 'networkd':
+                        # Rerun while the secondary cable is still absent. A
+                        # global reload here can drop the primary DHCP lease.
+                        again = run('--apply')
+                        assert again.returncode == 0, (again.stdout, again.stderr)
+                        repeated = (root / 'events').read_text()[len(events):]
+                        assert 'networkctl reload' not in repeated, repeated
+                        assert 'networkctl reconfigure' not in repeated, repeated
+                        runtime = root / 'run/systemd/network/10-netplan-eth1.network'
+                        runtime.write_text('[Match]\nName=eth1\n[Network]\nDHCP=no\n')
+                        changed = run('--apply')
+                        assert changed.returncode == 0, (changed.stdout, changed.stderr)
+                        assert 'networkctl reload' in (root / 'events').read_text()[len(events):]
+                        assert 'DHCP=ipv4' in runtime.read_text()
+                        events = (root / 'events').read_text()
                     # Cable insertion after setup must work without running apply
                     # again. A check alone may not activate or bounce interfaces.
                     (root / 'sys/class/net/eth1/carrier').write_text('1\n')
