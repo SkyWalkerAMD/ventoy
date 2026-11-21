@@ -7,7 +7,7 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 state=/var/lib/ventoy-center/manual-init
 mode=--apply
 case "${1:-}" in
-    --apply|--resume|--check|--software|--list-software|--check-software|--restore-user-login|--check-login|--help|-h)
+    --apply|--resume|--check|--software|--list-software|--check-software|--install-fyhoct|--restore-user-login|--check-login|--help|-h)
         mode=$1; shift;;
 esac
 name=; offline=0; keep_passwords=0; login_user=
@@ -23,7 +23,7 @@ while (($#)); do
     shift
 done
 case "$mode" in
-    --apply|--resume|--check|--software|--list-software|--check-software|--restore-user-login|--check-login) ;;
+    --apply|--resume|--check|--software|--list-software|--check-software|--install-fyhoct|--restore-user-login|--check-login) ;;
     --help|-h)
         cat <<'HELP'
 sudo ./ventoy-linux-setup.run [--hostname NAME] [--offline] [--keep-passwords]
@@ -32,6 +32,7 @@ sudo bash /opt/ventoy-manual/current/install.sh --check
 sudo bash ventoy-linux-setup.run --software
 sudo bash ventoy-linux-setup.run --list-software
 sudo bash ventoy-linux-setup.run --check-software
+sudo bash ventoy-linux-setup.run --install-fyhoct
 sudo bash ventoy-linux-setup.run --restore-user-login [--login-user user]
 sudo bash ventoy-linux-setup.run --check-login
 
@@ -46,6 +47,7 @@ Matching DEB/RPM packages are retained there too, including on installation fail
 Configured sckocstp/fyhocsys 0.8.6+ nodes join their pinned center after installation;
 their native services start on boot. Enrollment failures keep the setup retry request.
 --software installs that group alone; no account/network/hostname changes.
+--install-fyhoct explicitly installs sckoct-fyh and initializes its components.
 The current persistent hostname is preserved unless --hostname NAME is given.
 An explicit hostname is applied once; later administrator changes are retained.
 Interactive full setup asks for a hostname; Enter keeps the current name.
@@ -72,6 +74,9 @@ if [[ -n $login_user && $mode != --restore-user-login ]]; then
 fi
 if [[ $mode == --restore-user-login || $mode == --check-login ]]; then
     [[ -z $name && $offline == 0 && $keep_passwords == 0 ]] || die 'Login actions cannot be combined with full-setup options.'
+fi
+if [[ $mode == --install-fyhoct ]]; then
+    [[ -z $name && $offline == 0 && $keep_passwords == 0 ]] || die '--install-fyhoct does not accept additional options.'
 fi
 if [[ -n "$name" && $mode != --apply ]]; then
     echo '--hostname requires full setup; run setup --hostname NAME before software-only enrollment.' >&2
@@ -114,7 +119,7 @@ software_action() {
     "$python" "$here/software.py" "$1"
 }
 case "$mode" in
-    --software|--list-software|--check-software)
+    --software|--list-software|--check-software|--install-fyhoct)
         [[ $offline == 0 || $mode == --check-software ]] || die 'Software download is disabled by --offline.'
         (cd "$here" && sha256sum --status -c SHA256SUMS) || die 'Package integrity check failed.'
         exec > >(tee -a /var/log/ventoy-software.log) 2>&1

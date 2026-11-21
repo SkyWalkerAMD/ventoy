@@ -18,6 +18,7 @@ if [[ ${1:---help} == --help || ${1:-} == -h ]]; then
     echo 'Interactive full setup asks for hostname and an optional new root password (twice, hidden); Enter keeps the current value.'
     echo '--apply remains a compatible alias; --offline skips software downloads.'
     echo 'Software only: sudo ./ventoy-linux-setup.run --software'
+    echo 'Optional FYHOCT install and initialization: --install-fyhoct'
     echo 'Inspect/verify: --check / --list-software / --check-software'
     echo 'Optional Ubuntu/Debian user + sudo login: --restore-user-login [--login-user user]'
     echo 'This verifies the ordinary user password, then disables root SSH and console password login; --check-login checks the saved policy.'
@@ -46,7 +47,7 @@ if [[ ${1:-} == --upgrade ]]; then
 fi
 hostname_before=$(hostname)
 interactive_apply=1
-case "${1:-}" in --check|--resume|--software|--list-software|--check-software|--restore-user-login|--check-login) interactive_apply=0;; esac
+case "${1:-}" in --check|--resume|--software|--list-software|--check-software|--install-fyhoct|--restore-user-login|--check-login) interactive_apply=0;; esac
 python=
 for candidate in python3 /usr/libexec/platform-python python2 python; do
     if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (2,7) else 1)' 2>/dev/null; then
@@ -103,7 +104,7 @@ case "${1:-}" in
         exec /bin/bash "$runner" --apply "${upgrade_args[@]}";;
 esac
 bash "$stage/ventoy-manual-setup/install.sh" "$@" || setup_rc=$?
-case "${1:-}" in --restore-user-login|--check-login) exit "$setup_rc";; esac
+case "${1:-}" in --restore-user-login|--check-login|--install-fyhoct) exit "$setup_rc";; esac
 if (( (setup_rc == 0 || setup_rc == 3 || setup_rc == 4) && interactive_apply)) && [[ -t 0 && -t 1 && -t 2 ]]; then
     # Status 4 means system checks reached the software step, which failed.
     # That independent failure must not hide the optional password dialog.

@@ -1,5 +1,10 @@
 # 开发记录
 
+## 0.3.0-alpha.62 — 2026-11-21
+
+- Add the explicit `--install-fyhoct` command for matching sckoct-fyh 1.2.6+
+  packages and encrypted components. Standard setup retains the package as a file.
+
 ## 0.3.0-alpha.61 — 2026-11-21
 
 - Return to the original login when setup finishes, including after a hostname

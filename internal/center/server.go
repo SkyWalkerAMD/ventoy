@@ -180,6 +180,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /software/v1/manifest", s.softwareAuth(s.softwareManifest))
 	m.HandleFunc("GET /software/v1/package", s.softwareAuth(s.softwarePackage))
 	m.HandleFunc("GET /software/v1/fyhoc-unlock", s.softwareAuth(s.softwareFYHOCUnlock))
+	m.HandleFunc("GET /software/v1/fyhoct-install", s.softwareAuth(s.softwareFYHOCTInstall))
 	m.HandleFunc("GET /software/v1/node-join", s.softwareAuth(s.softwareNodeJoin))
 	m.HandleFunc("POST /api/machines", s.auth(s.createMachine))
 	m.HandleFunc("DELETE /api/machines/{id}", s.auth(s.deleteMachine))

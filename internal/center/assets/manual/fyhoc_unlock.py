@@ -39,23 +39,24 @@ def password_bytes(value):
     return key
 
 
-def trusted_binary():
+def trusted_binary(command='fyhoc'):
     # Do not execute a caller-controlled PATH entry as root during authentication.
-    for name in ('/usr/bin/fyhoc', '/usr/local/bin/fyhoc', '/usr/sbin/fyhoc', '/usr/local/sbin/fyhoc'):
+    for directory in ('/usr/bin', '/usr/local/bin', '/usr/sbin', '/usr/local/sbin'):
+        name = os.path.join(directory, command)
         if not os.path.exists(name):
             continue
         real = os.path.realpath(name)
         st = os.stat(real)
         if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o022 or not os.access(real, os.X_OK):
-            raise RuntimeError('FYHOC executable is not root-owned and protected')
+            raise RuntimeError('%s executable is not root-owned and protected' % command)
         directory = os.path.dirname(real)
         while directory != '/':
             st = os.stat(directory)
             if st.st_uid != 0 or st.st_mode & 0o022:
-                raise RuntimeError('FYHOC executable directory is not protected')
+                raise RuntimeError('%s executable directory is not protected' % command)
             directory = os.path.dirname(directory)
         return real
-    raise RuntimeError('Installed FYHOC executable was not found')
+    raise RuntimeError('Installed %s executable was not found' % command)
 
 
 def unlocked(binary):

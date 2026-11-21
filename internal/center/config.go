@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-const Version = "0.3.0-alpha.61"
+const Version = "0.3.0-alpha.62"
 
 type Config struct {
 	Listen                    string         `json:"listen"`
@@ -30,6 +30,7 @@ type Config struct {
 	InstallerCacheConcurrency int            `json:"installer_cache_concurrency,omitempty"`
 	SoftwareRPMMinEL          map[string]int `json:"software_rpm_min_el,omitempty"`
 	FYHOCUnlockPasswordFile   string         `json:"fyhoc_unlock_password_file,omitempty"`
+	FYHOCTInstallKeyFile      string         `json:"fyhoct_install_key_file,omitempty"`
 	NodeJoinConfigFile        string         `json:"node_join_config_file,omitempty"`
 	LinuxSetupPreload         bool           `json:"linux_setup_preload,omitempty"`
 	AdminTokenFile            string         `json:"admin_token_file"`
@@ -120,7 +121,7 @@ func loadConfig(path string) (Config, error) {
 	if c.InstallerCacheConcurrency < 0 || c.InstallerCacheConcurrency > 16 {
 		return c, errors.New("installer_cache_concurrency must be 1–16, or 0 for default 4")
 	}
-	for _, p := range []*string{&c.DataDir, &c.ISODir, &c.PackageDir, &c.SoftwareDir, &c.InstallerCacheDir, &c.FYHOCUnlockPasswordFile, &c.NodeJoinConfigFile, &c.AdminTokenFile, &c.TLSCert, &c.TLSKey, &c.BootstrapCA, &c.IVentoyRoot} {
+	for _, p := range []*string{&c.DataDir, &c.ISODir, &c.PackageDir, &c.SoftwareDir, &c.InstallerCacheDir, &c.FYHOCUnlockPasswordFile, &c.FYHOCTInstallKeyFile, &c.NodeJoinConfigFile, &c.AdminTokenFile, &c.TLSCert, &c.TLSKey, &c.BootstrapCA, &c.IVentoyRoot} {
 		if *p != "" && !filepath.IsAbs(*p) {
 			*p = filepath.Join(base, *p)
 		}
@@ -132,6 +133,9 @@ func loadConfig(path string) (Config, error) {
 		if !nodeJoinFileOutsideSoftware(c.NodeJoinConfigFile, c.SoftwareDir) {
 			return c, errors.New("node_join_config_file must be outside software_dir")
 		}
+	}
+	if c.FYHOCTInstallKeyFile != "" && (c.SoftwareDir == "" || !nodeJoinFileOutsideSoftware(c.FYHOCTInstallKeyFile, c.SoftwareDir)) {
+		return c, errors.New("fyhoct_install_key_file requires software_dir and must be outside it")
 	}
 	if c.FYHOCUnlockPasswordFile != "" && c.SoftwareDir != "" {
 		rel, err := filepath.Rel(c.SoftwareDir, c.FYHOCUnlockPasswordFile)
