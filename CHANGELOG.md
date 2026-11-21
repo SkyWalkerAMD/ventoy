@@ -1,5 +1,10 @@
 # 开发记录
 
+## 0.3.0-alpha.61 — 2026-11-21
+
+- Return to the original login when setup finishes, including after a hostname
+  change. Local consoles and SSH sessions no longer inherit a nested Bash.
+
 ## 0.3.0-alpha.60 — 2026-11-18
 
 - Keep normal Linux PXE startup as the default. Offer AST/BMC display

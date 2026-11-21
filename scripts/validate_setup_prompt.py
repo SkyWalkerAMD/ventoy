@@ -28,16 +28,13 @@ with tempfile.TemporaryDirectory(prefix='vc-prompt-') as folder:
     (root / 'home').mkdir()
     for name, content in {
         'hostname': '#!/bin/sh\ncat "$FIXTURE_HOSTNAME"\n',
-        'id': '#!/bin/sh\n[ "$*" = "-u fixture-user" ] && echo 1234\n',
-        'runuser': '#!/bin/sh\n[ "$*" = "-u fixture-user -- /bin/bash -i" ] || exit 99\necho CALLER_ACCOUNT_REFRESH\n',
-        'ps': '#!/bin/sh\nif [ "${FIXTURE_SUDO:-}" = 1 ]; then\n case "$*" in "-o comm="*) echo sudo; exit;; "-o ruid="*) echo 1234; exit;; esac\nfi\nexec /bin/ps "$@"\n',
+        'runuser': '#!/bin/sh\necho CALLER_ACCOUNT_REFRESH\nexit 99\n',
     }.items():
         p = root / 'bin' / name
         p.write_text(content)
         p.chmod(0o755)
-    # A real interactive Bash reads this file. Its marker proves the launcher
-    # actually entered a fresh shell; exiting prevents a CI prompt from hanging.
-    (root / 'home/.bashrc').write_text('printf "FRESH_BASH cwd=%s\\n" "$PWD"\nprintf "USER_LOCALE=%s\\n" "$LC_ALL"\nexit 0\n')
+    # A nested Bash reads this marker even if it happens to exit promptly.
+    (root / 'home/.bashrc').write_text('echo FRESH_BASH\nexit 0\n')
     payload = b'''#!/bin/bash
 set -eu
 [ "$LC_ALL" = C ] || { echo SETUP_LOCALE_NOT_ENGLISH; exit 1; }
@@ -57,15 +54,15 @@ exit "${FIXTURE_RC:-0}"
     launcher.write_bytes(template.replace('@ARCHIVE_SHA256@', hashlib.sha256(data).hexdigest()).encode() + data)
     launcher.chmod(0o755)
 
-    def run(args=(), rename=True, rc=0, terminal=True, sudo=False, stale_sudo=False, password_rc=0):
+    def run(args=(), rename=True, rc=0, terminal=True, sudo=False, password_rc=0):
         (root / 'hostname').write_text('old-host\n')
         env = dict(os.environ, HOME=str(root / 'home'), PATH=str(root / 'bin') + ':' + os.environ['PATH'],
                    LC_ALL='POSIX', LANGUAGE='zh_CN',
-                   FIXTURE_HOSTNAME=str(root / 'hostname'), FIXTURE_RENAME=str(int(rename)), FIXTURE_RC=str(rc), FIXTURE_SUDO=str(int(sudo)),
+                   FIXTURE_HOSTNAME=str(root / 'hostname'), FIXTURE_RENAME=str(int(rename)), FIXTURE_RC=str(rc),
                    FIXTURE_PASSWORD_RC=str(password_rc))
         for key in ('SUDO_USER', 'SUDO_UID', 'BASH_ENV', 'ENV'):
             env.pop(key, None)
-        if sudo or stale_sudo:
+        if sudo:
             env.update(SUDO_USER='fixture-user', SUDO_UID='1234')
         command = ['/bin/bash', str(launcher), *args]
         if not terminal:
@@ -97,11 +94,13 @@ exit "${FIXTURE_RC:-0}"
                 os.kill(pid, 9)
                 os.waitpid(pid, 0)
             os.close(fd)
-        return os.waitstatus_to_exitcode(status), output.decode(errors='replace')
+        output = output.decode(errors='replace')
+        assert 'FRESH_BASH' not in output and 'CALLER_ACCOUNT_REFRESH' not in output, output
+        return os.waitstatus_to_exitcode(status), output
 
     code, out = run()
-    assert 'USER_LOCALE=POSIX' in out and 'SETUP_LOCALE_NOT_ENGLISH' not in out, out
-    assert code == 0 and 'PASSWORD_DIALOG' in out and 'HOSTNAME_VERIFIED: new-host' in out and 'FRESH_BASH cwd=' + str(root) in out, out
+    assert 'SETUP_LOCALE_NOT_ENGLISH' not in out, out
+    assert code == 0 and 'PASSWORD_DIALOG' in out and 'HOSTNAME_VERIFIED: new-host' in out and 'run exec bash' in out, out
     for options in ({'rename': False}, {'terminal': False}, {'args': ['--check']},
                     {'args': ['--resume']}, {'args': ['--software']}, {'rc': 17},
                     {'args': ['--restore-user-login']}, {'args': ['--check-login']},
@@ -111,18 +110,15 @@ exit "${FIXTURE_RC:-0}"
         wanted = options.get('terminal', True) and options.get('rc', 0) in (0, 3, 4) and not options.get('args')
         assert ('PASSWORD_DIALOG' in out) == wanted, (options, out)
     code, out = run(sudo=True)
-    assert code == 0 and 'CALLER_ACCOUNT_REFRESH' in out and 'FRESH_BASH' not in out, out
-    code, out = run(stale_sudo=True)
-    assert code == 0 and 'FRESH_BASH' in out and 'CALLER_ACCOUNT_REFRESH' not in out, out
+    assert code == 0 and 'HOSTNAME_VERIFIED: new-host' in out, out
     for rc in (3, 4):
         for sudo in (False, True):
             code, out = run(rc=rc, sudo=sudo)
-            assert code == rc and 'PASSWORD_DIALOG' in out and 'SETUP_INCOMPLETE:' in out, (code, out)
-            assert ('CALLER_ACCOUNT_REFRESH' if sudo else 'FRESH_BASH') in out, out
+            assert code == rc and 'PASSWORD_DIALOG' in out and 'HOSTNAME_VERIFIED: new-host' in out, (code, out)
         code, out = run(rc=rc, rename=False)
         assert code == rc and 'PASSWORD_DIALOG' in out and 'FRESH_BASH' not in out, (code, out)
     code, out = run(rc=4, password_rc=2)
     assert code == 4 and 'PASSWORD_DIALOG' in out, (code, out)
     code, out = run(password_rc=2)
     assert code == 2 and 'FRESH_BASH' not in out, (code, out)
-print('PASS: fresh interactive prompt, password dialog after software failure, preserved error status and caller identity')
+print('PASS: setup returns to the existing terminal after a rename, preserves status and keeps the password dialog')

@@ -184,15 +184,12 @@ Add `sudo safe-server-init hostname server02 --update-hosts` if local hosts entr
 also need updating. Upgrade and run setup once on nodes with older hostname
 recovery behavior so future boots preserve administrator changes.
 
-After an interactive hostname change, the launcher opens a fresh Bash on the
-same foreground terminal, preserving the directory and invoking sudo account.
-This refreshes Bash's cached prompt; hostnamectl has already changed and verified
-the system name. Pending checks (exit 3) or software failures (exit 4) still allow
-the optional root password prompt and prompt refresh; their status is retained.
-On leaving the fresh shell, the original waiting shell receives the setup status.
-Background, redirected, check-only, software-only, and failed system-configuration
-runs do not open a shell. When running extracted install.sh directly, use
-`exec bash` or log in again to refresh the original terminal prompt.
+After an interactive hostname change, setup reports the active hostname and
+returns to the original login with its exit status. If Bash still shows the old
+name in the prompt, run `exec bash` in that shell or log in again. One `exit`
+from the original console login returns it to the login screen. Pending checks
+(exit 3) or software failures (exit 4) still allow the optional root password
+prompt.
 
 Setup does not downgrade a kernel already changed during manual installation.
 Downloading setup alone does not add E610 support to the live ISO installer;
