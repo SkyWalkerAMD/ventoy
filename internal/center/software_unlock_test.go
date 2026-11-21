@@ -8,6 +8,33 @@ import (
 	"testing"
 )
 
+func TestSoftwareFYHOCTInstallKey(t *testing.T) {
+	s := softwareFixture(t)
+	url := "/software/v1/fyhoct-install"
+	mustCode(t, request(s, "GET", url, "", nil), 401)
+	mustCode(t, request(s, "GET", url, s.softwareToken(), nil), 200)
+	s.config.FYHOCTInstallKeyFile = filepath.Join(t.TempDir(), "install-key")
+	key := strings.Repeat("F", 32)
+	for _, tc := range []struct {
+		value string
+		code  int
+	}{{"short", 503}, {key + "\r\n", 200}} {
+		if err := os.WriteFile(s.config.FYHOCTInstallKeyFile, []byte(tc.value), 0600); err != nil {
+			t.Fatal(err)
+		}
+		w := request(s, "GET", url, s.softwareToken(), nil)
+		mustCode(t, w, tc.code)
+		if tc.code == 200 && (!strings.Contains(w.Body.String(), key) || w.Header().Get("Cache-Control") != "no-store") {
+			t.Fatal("incorrect FYHOCT response")
+		}
+	}
+	files := map[string][]byte{}
+	s.addSoftwareClient(files)
+	if strings.Contains(string(files["software-client.json"]), key) || !strings.Contains(string(files["software-client.json"]), `"fyhoct_install": true`) {
+		t.Fatal("setup bundles should contain only the FYHOCT enable flag")
+	}
+}
+
 func TestSoftwareUnlockCredentialIsolationAndRotation(t *testing.T) {
 	s := softwareFixture(t)
 	url := "/software/v1/fyhoc-unlock"

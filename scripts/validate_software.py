@@ -1,6 +1,7 @@
 """Software-client boundaries; --native exercises real disposable RPM/DEB roots."""
 import copy
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -20,6 +21,8 @@ spec = importlib.util.spec_from_file_location('software', source)
 client = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(client)
 
+if (source.parent / 'fyhoct_install.py').is_file():
+    sys.path.insert(0, str(source.parent))
 
 class Boundaries(unittest.TestCase):
     def setUp(self):
@@ -28,6 +31,52 @@ class Boundaries(unittest.TestCase):
         patcher = patch.object(client, 'STAGING', staging.name)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    @unittest.skipUnless((source.parent / 'fyhoct_install.py').is_file(), 'requires full setup source')
+    def test_fyhoct_receives_verified_bundles_and_key_after_package_install(self):
+        import fyhoct_install
+        wanted = dict(os='rocky', version='9.2', arch='x86_64')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'software-client.json').write_text('{"enabled":true,"fyhoct_install":true}')
+            names = ['sckoct-fyh-1.2.6-1.el9.x86_64.rpm', *fyhoct_install.COMPONENTS]
+            payload = b'fixture'
+            entries = [dict(path=n, size=len(payload), sha256=hashlib.sha256(payload).hexdigest()) for n in names]
+            group = dict(id='flat', **wanted, files=[entries[0]])
+            manifest = dict(schema=1, target=wanted, group=group, copy_files=entries[1:])
+            events = []
+
+            class FakeClient:
+                def __init__(self, config): pass
+                def manifest(self, target): return manifest
+                def download(self, item, dest): Path(dest).write_bytes(payload)
+                def get(self, endpoint, params):
+                    self_test.assertEqual(endpoint, 'fyhoct-install')
+                    events.append('key')
+                    return io.BytesIO(json.dumps({'enabled': True, 'key': 'K'*32}).encode())
+
+            self_test = self
+            package = dict(name='sckoct-fyh', version='0:1.2.6-1.el9', arch='x86_64', target_arch='x86_64')
+
+            def configure(directory, key):
+                self.assertEqual(key, 'K'*32)
+                for name in fyhoct_install.COMPONENTS:
+                    self.assertEqual((Path(directory)/name).read_bytes(), payload)
+                events.append('components')
+
+            with patch.object(client, 'HERE', str(root)), patch.object(client, 'STATE', str(root/'state')), \
+                 patch.object(client, 'ARCHIVES', str(root/'files')), patch.object(client, 'Client', FakeClient), \
+                 patch.object(client, 'target', return_value=wanted), patch.object(client, 'metadata', return_value=package), \
+                 patch.object(client, 'transaction', side_effect=lambda *a, **k: events.append('rpm') or 1), \
+                 patch.object(client, 'verify'), patch.object(client, 'installed', return_value={}), \
+                 patch.object(fyhoct_install, 'configure', side_effect=configure):
+                client.execute('--list-software')
+                self.assertEqual(events, [])
+                client.execute('--software')
+            self.assertEqual(events, ['key', 'rpm', 'components'])
+            report = (root/'state/last-result.json').read_text()
+            self.assertTrue(json.loads(report)['fyhoct_components'])
+            self.assertNotIn('K'*32, report)
 
     def test_package_files_persist_backfill_and_retry(self):
         for family, wanted in [('deb', dict(os='ubuntu', version='22.04', arch='amd64')),
@@ -53,7 +102,7 @@ class Boundaries(unittest.TestCase):
                 def metadata(path, *args):
                     self.assertEqual(Path(path).read_bytes(), payload)
                     return dict(package, file=path)
-                def install(packages, *args):
+                def install(packages, *args, **kwargs):
                     self.assertEqual(Path(packages[0]['file']), root/'files'/name)
                     installs.append(1)
                     return 1
@@ -166,7 +215,7 @@ class Boundaries(unittest.TestCase):
                 def metadata(path, *args):
                     name, version = Path(path).read_text().split()
                     return dict(name=name, version=version, arch=wanted['arch'], target_arch=wanted['arch'], file=path)
-                def install(packages, *args):
+                def install(packages, *args, **kwargs):
                     installs.append([p['name'] for p in packages])
                     self.assertEqual(installs[-1], ['ordinary-app'])
                     return 1

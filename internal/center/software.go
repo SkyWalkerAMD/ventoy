@@ -136,6 +136,7 @@ func (s *Server) addSoftwareClient(files map[string][]byte) {
 		// Capability only: private join settings are fetched at execution time,
 		// so key rotation never requires rebuilding setup or installer media.
 		c["node_join"] = true
+		c["fyhoct_install"] = s.config.FYHOCTInstallKeyFile != ""
 		if len(s.ca) > 0 {
 			files["software-ca.crt"] = s.ca
 			c["ca_file"] = "software-ca.crt"

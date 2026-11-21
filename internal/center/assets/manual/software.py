@@ -45,8 +45,8 @@ MAX_FILE = 4 * 1024**3
 MAX_TOTAL = 8 * 1024**3
 
 
-def copy_only(name):
-    return name.split(':', 1)[0] in COPY_ONLY_PACKAGES
+def copy_only(name, policy=COPY_ONLY_PACKAGES):
+    return name.split(':', 1)[0] in policy
 
 
 def run(args, echo=False):
@@ -211,7 +211,7 @@ def protected(name):
     return any(fnmatch.fnmatchcase(name, p) for p in patterns)
 
 
-def metadata(file, family, arch):
+def metadata(file, family, arch, policy=COPY_ONLY_PACKAGES):
     if family == 'deb':
         result = run(['dpkg-deb', '-f', file, 'Package', 'Version', 'Architecture', 'Provides'])
         fields = {}
@@ -228,7 +228,7 @@ def metadata(file, family, arch):
     if not NAME.match(name) or not version or package_arch not in (arch, 'all' if family == 'deb' else 'noarch'):
         raise RuntimeError('Invalid package metadata or architecture: ' + os.path.basename(file))
     package = dict(name=name, version=version, arch=package_arch, target_arch=arch, file=file)
-    if copy_only(name):
+    if copy_only(name, policy):
         return package
     if family == 'rpm':
         provides = run(['rpm', '-qp', '--provides', file])
@@ -379,15 +379,15 @@ def run_rpm_transaction(args):
     record_rpm_scriptlet_errors(output)
 
 
-def check_rpm_scriptlets(current):
+def check_rpm_scriptlets(current, policy=COPY_ONLY_PACKAGES):
     failure = rpm_scriptlet_failures()
     unresolved = [key for key, version in failure['packages'].items()
                   if current.get(key) == version]
-    excluded = [key for key in unresolved if copy_only(key)]
+    excluded = [key for key in unresolved if copy_only(key, policy)]
     if excluded:
         print('COPY_ONLY_WARNING: previous installation failures remain recorded for %s; '
               'these packages are excluded from installation verification, not repaired.' % ', '.join(sorted(excluded)))
-    unresolved = [key for key in unresolved if not copy_only(key)]
+    unresolved = [key for key in unresolved if not copy_only(key, policy)]
     if unresolved or failure['unknown']:
         raise RuntimeError('Unresolved RPM installation script failure: %s. '
                            'Install a corrected package version or repair and review '
@@ -396,12 +396,12 @@ def check_rpm_scriptlets(current):
                             os.path.join(STATE, 'rpm-scriptlet-failures.json')))
 
 
-def verify(packages, family, before=None):
-    if any(copy_only(p['name']) for p in packages):
+def verify(packages, family, before=None, policy=COPY_ONLY_PACKAGES):
+    if any(copy_only(p['name'], policy) for p in packages):
         raise RuntimeError('Copy-only packages cannot be certified as installed; rerun setup --software to refresh the report')
     after = installed(family)
     if family == 'rpm':
-        check_rpm_scriptlets(after)
+        check_rpm_scriptlets(after, policy)
     for p in packages:
         current = current_version(after,p,family)
         if current is None or compare_versions(current,p['version'],family)<0:
@@ -414,8 +414,8 @@ def verify(packages, family, before=None):
     return after
 
 
-def transaction(packages, family, work, allow_dependencies=True):
-    if any(copy_only(p['name']) for p in packages):
+def transaction(packages, family, work, allow_dependencies=True, policy=COPY_ONLY_PACKAGES):
+    if any(copy_only(p['name'], policy) for p in packages):
         raise RuntimeError('Copy-only packages must not enter an installation transaction')
     before = installed(family)
     pending = [p for p in packages if current_version(before,p,family) is None or compare_versions(current_version(before,p,family),p['version'],family)<0]
@@ -451,7 +451,7 @@ def transaction(packages, family, work, allow_dependencies=True):
             for line in plan.splitlines():
                 if line.startswith('Remv ') or (line.startswith('Inst ') and protected(line.split()[1])):
                     raise RuntimeError('Package transaction would remove software or change the kernel')
-                if line.startswith(('Inst ', 'Conf ')) and copy_only(line.split()[1]):
+                if line.startswith(('Inst ', 'Conf ')) and copy_only(line.split()[1], policy):
                     raise RuntimeError('APT would install or configure a copy-only package: ' + line.split()[1])
             run(base + ['-y', 'install'] + files, echo=True)
         else:
@@ -468,12 +468,12 @@ def transaction(packages, family, work, allow_dependencies=True):
                 # Only this install transaction and its dependencies, never a
                 # whole-system update/upgrade/distro-sync. Preserve user locks.
                 args = [manager, '-y', '--exclude=kernel*', '--setopt=obsoletes=0', '--setopt=install_weak_deps=False', '--setopt=timeout=30', '--setopt=retries=1']
-                args += ['--exclude=' + name for name in COPY_ONLY_PACKAGES]
+                args += ['--exclude=' + name for name in policy]
                 run(args + ['--setopt=tsflags=test', 'install'] + files, echo=True)
                 run_rpm_transaction(args + ['install'] + files)
             else:
                 run_rpm_transaction(['rpm', '-Uvh'] + files)
-    verify(packages, family, before)
+    verify(packages, family, before, policy)
     return len(pending)
 
 
@@ -577,6 +577,10 @@ def configure_nodes(client, family):
     return node_join.configure(nodes, set(name.split(':')[0] for name in installed(family)))
 
 
+def fyhoct_policy(enabled):
+    return tuple(name for name in COPY_ONLY_PACKAGES if not enabled or name != 'sckoct-fyh')
+
+
 def execute(mode):
     wanted = target()
     family = 'deb' if wanted['os'] in ('ubuntu', 'debian') else 'rpm'
@@ -585,11 +589,15 @@ def execute(mode):
             report = json.load(f)
         if report.get('status') != 'verified' or report.get('target') != wanted:
             raise RuntimeError('No successfully installed matching software group to verify')
-        if report.get('copy_only_policy') != list(COPY_ONLY_PACKAGES):
+        policy = fyhoct_policy(report.get('fyhoct_components') is True)
+        if report.get('copy_only_policy') != list(policy):
             raise RuntimeError('Software delivery policy changed; run setup --software before checking')
-        verify(report['packages'], family)
+        verify(report['packages'], family, policy=policy)
         verify_archives(report.get('archives', []))
         verify_archives(report.get('package_files', []))
+        if report.get('fyhoct_components'):
+            import fyhoct_install
+            fyhoct_install.check()
         if report.get('fyhoc_unlock'):
             import fyhoc_unlock
             fyhoc_unlock.check()
@@ -611,8 +619,11 @@ def execute(mode):
     archives = manifest.get('archives', []) + manifest.get('copy_files', [])
     files = group['files'] if group else []
     print('Default software group: %s (%s packages)' % (group['id'] if group else 'none', len(files)))
-    print('Copy-only package policy: %s. Files are retained in %s; no automatic installation or upgrade.' %
-          (', '.join(COPY_ONLY_PACKAGES), ARCHIVES))
+    enabled = config.get('fyhoct_install') is True
+    if enabled:
+        import fyhoct_install
+    print('Copy-only packages: %s. FYHOCT automatic setup: %s.' %
+          (', '.join(fyhoct_policy(enabled)), 'enabled for sckoct-fyh 1.2.6+' if enabled else 'disabled'))
     for f in files:
         print('  %s  %s bytes  sha256=%s' % (f['path'].split('/')[-1], f['size'], f['sha256']))
     for f in archives:
@@ -631,16 +642,18 @@ def execute(mode):
         with open(previous) as f:
             last = json.load(f)
         if (last.get('status') == 'verified' and last.get('target') == wanted and
-                last.get('copy_only_policy') == list(COPY_ONLY_PACKAGES) and
+                last.get('fyhoct_enabled', False) == enabled and
+                last.get('copy_only_policy') == list(fyhoct_policy(last.get('fyhoct_components') is True)) and
                 last.get('manifest', {}).get('group') == group):
-            verify(last['packages'], family)
+            verify(last['packages'], family, policy=tuple(last['copy_only_policy']))
             unchanged = last['packages']
     except (IOError, ValueError, RuntimeError):
         pass
     work = tempfile.mkdtemp(prefix='ventoy-software-', dir=STAGING)
     report = dict(status='failed', target=wanted, group=group['id'] if group else None, manifest=manifest,
                   time=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), packages=[], archives=archives,
-                  package_files=files, copy_only_policy=list(COPY_ONLY_PACKAGES), copy_only_packages=[])
+                  package_files=files, copy_only_policy=list(COPY_ONLY_PACKAGES), copy_only_packages=[],
+                  fyhoct_enabled=enabled)
     node_join_attempted = False
     try:
         sync_archives(client, archives)
@@ -650,9 +663,10 @@ def execute(mode):
         candidates = []
         for item in (files if unchanged is None else []):
             dest = os.path.join(ARCHIVES, item['path'].split('/')[-1])
-            p = metadata(dest, family, wanted['arch'])
+            p = metadata(dest, family, wanted['arch'], fyhoct_policy(enabled))
             p['sha256'] = item['sha256']
-            if copy_only(p['name']):
+            if (copy_only(p['name'], fyhoct_policy(enabled)) or
+                    (enabled and p['name'] == fyhoct_install.PACKAGE and not fyhoct_install.supported(p['version']))):
                 report['copy_only_packages'].append(p)
                 continue
             if family == 'rpm':
@@ -665,16 +679,31 @@ def execute(mode):
         report['packages'] = select_latest(candidates, family, wanted['arch']) if unchanged is None else unchanged
         if unchanged is not None:
             report['copy_only_packages'] = last.get('copy_only_packages', [])
+        managed = enabled and any(p['name'] == fyhoct_install.PACKAGE for p in report['packages'])
+        policy = fyhoct_policy(managed)
+        report['copy_only_policy'] = list(policy)
+        if managed:
+            names = set(item['path'] for item in archives)
+            if not set(fyhoct_install.COMPONENTS).issubset(names):
+                raise RuntimeError('FYHOCT component bundles are missing from the center tools library')
+            fyhoct_key = fyhoct_install.load_key(client)
         for p in report['copy_only_packages']:
             print('COPY_ONLY: %s %s; retained, not installed or upgraded.' % (p['name'], p['version']))
-        changed = transaction(report['packages'], family, work) if report['packages'] and unchanged is None else 0
+        changed = transaction(report['packages'], family, work, policy=policy) if report['packages'] and unchanged is None else 0
         if not report['packages']:
             verify([], family)
+        verify_archives(archives)
+        verify_archives(files)
+        if managed:
+            before_components = installed(family)
+            try:
+                fyhoct_install.configure(ARCHIVES, fyhoct_key)
+            finally:
+                verify(report['packages'], family, before_components, policy)
+            report['fyhoct_components'] = True
         policy = os.path.join(HERE, 'linux-update-policy.sh')
         if os.path.isdir('/var/lib/ventoy-center/kernel-policy'):
             run(['sh', policy, '--check'], echo=True)
-        verify_archives(archives)
-        verify_archives(files)
         if any(name.split(':')[0] == 'fyhoc' for name in installed(family)):
             import fyhoc_unlock
             report['fyhoc_unlock'] = fyhoc_unlock.configure(client)

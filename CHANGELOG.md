@@ -1,5 +1,10 @@
 # 开发记录
 
+## 0.3.0-alpha.62 — 2026-11-21
+
+- Allow a center-configured FYHOCT installation key to enable automatic
+  installation of matching sckoct-fyh 1.2.6+ packages and encrypted components.
+
 ## 0.3.0-alpha.61 — 2026-11-21
 
 - Return to the original login when setup finishes, including after a hostname

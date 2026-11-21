@@ -2,9 +2,11 @@
 
 从 alpha.29 开始，新版 `ventoy-linux-setup.run` 可以从中心服务器获取 RPM / DEB，在已安装并启动的 Linux 节点上安装或升级。不重新装系统，不改磁盘；软件模式不重设账户、主机名或网络。
 
-从 alpha.55 开始，`sckoct-pub`、`sckoct-pub-suite`（公开版的实际包名）和 `sckoct-fyh` 的适配 RPM / DEB **只下载，不自动安装或升级**。文件校验后保存在 `/root/ventoy-tools/`，由管理员按需手动安装；已经装过的版本不卸载。策略按包内部名称判断，改文件名不能绕过。普通 setup、`--upgrade`、`--software` 及全部 Linux 手动／自动预置包使用同一策略，其他软件照常安装、升级及检查。
+公开版 `sckoct-pub`、`sckoct-pub-suite` 的适配 RPM / DEB 仅保存到 `/root/ventoy-tools/`。策略按包内部名称判断。alpha.62 起，中心配置 `fyhoct_install_key_file` 后可自动安装适配的 `sckoct-fyh` 1.2.6 及更新版本。未配置时和低于 1.2.6 的包仍按只下载处理。
 
-结果分别记录 `packages`（验收安装）和 `copy_only_packages`（仅验收文件传输），控制台显示 `COPY_ONLY`。旧版本报告会在下次运行时重新分类。这三个包已有的 RPM 安装脚本失败记录保留，并显示 `COPY_ONLY_WARNING`，不把它们标记为已修复，也不阻断其余软件和节点绑定；其他包或无法归属的失败仍报错。APT 如计划安装/配置这些包会停止，DNF/YUM 依赖安装也排除它们。
+将同版发布的 RPM / DEB、`oc-engine-linux.tar.gz.enc` 和 `oc-deps-linux.tar.gz.enc` 放进 tools。安装密钥应为中心软件服务账号可读的私有文件，权限为 0600，路径放在 tools 之外。普通 setup、`--upgrade` 和 `--software` 会校验软件包与组件，先装包，再用官方 `fyhoct install` 初始化组件。安装密钥从鉴权接口读取，仅供该进程使用。`--check-software` 会确认引擎与依赖均已安装。
+
+结果分别记录 `packages`（验收安装）和 `copy_only_packages`（验收文件传输）。已执行组件安装的节点还记录 `fyhoct_components`。仅分发包的旧 RPM 安装脚本失败记录继续显示为 `COPY_ONLY_WARNING`。启用自动安装的包必须通过常规安装脚本验收。
 
 ## 服务器目录
 
