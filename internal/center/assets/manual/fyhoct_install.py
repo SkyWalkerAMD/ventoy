@@ -77,9 +77,8 @@ def configure(directory, key):
         call(binary, ['install', '--yes', '--engine', os.path.join(directory, COMPONENTS[0])],
              900, directory, key)
     check()
-    print('FYHOCT_VERIFIED: engine and dependencies installed.')
 
 
 def check():
     if not ready(trusted_binary('fyhoct')):
-        raise RuntimeError('FYHOCT engine or dependencies are not ready; rerun setup --software')
+        raise RuntimeError('FYHOCT engine or dependencies are not ready; rerun setup --install-fyhoct')

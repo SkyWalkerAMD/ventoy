@@ -39,11 +39,11 @@ class Boundaries(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root/'software-client.json').write_text('{"enabled":true,"fyhoct_install":true}')
-            names = ['sckoct-fyh-1.2.6-1.el9.x86_64.rpm', *fyhoct_install.COMPONENTS]
+            names = ['sckoct-fyh-1.2.6-1.el9.x86_64.rpm', 'other-1.x86_64.rpm', *fyhoct_install.COMPONENTS]
             payload = b'fixture'
             entries = [dict(path=n, size=len(payload), sha256=hashlib.sha256(payload).hexdigest()) for n in names]
-            group = dict(id='flat', **wanted, files=[entries[0]])
-            manifest = dict(schema=1, target=wanted, group=group, copy_files=entries[1:])
+            group = dict(id='flat', **wanted, files=entries[:2])
+            manifest = dict(schema=1, target=wanted, group=group, copy_files=entries[2:])
             events = []
 
             class FakeClient:
@@ -58,6 +58,13 @@ class Boundaries(unittest.TestCase):
             self_test = self
             package = dict(name='sckoct-fyh', version='0:1.2.6-1.el9', arch='x86_64', target_arch='x86_64')
 
+            def metadata(path, *args):
+                return dict(package, name='other' if Path(path).name == names[1] else package['name'])
+
+            def transaction(packages, *args, **kwargs):
+                events.append([p['name'] for p in packages])
+                return len(packages)
+
             def configure(directory, key):
                 self.assertEqual(key, 'K'*32)
                 for name in fyhoct_install.COMPONENTS:
@@ -66,16 +73,21 @@ class Boundaries(unittest.TestCase):
 
             with patch.object(client, 'HERE', str(root)), patch.object(client, 'STATE', str(root/'state')), \
                  patch.object(client, 'ARCHIVES', str(root/'files')), patch.object(client, 'Client', FakeClient), \
-                 patch.object(client, 'target', return_value=wanted), patch.object(client, 'metadata', return_value=package), \
-                 patch.object(client, 'transaction', side_effect=lambda *a, **k: events.append('rpm') or 1), \
+                 patch.object(client, 'target', return_value=wanted), patch.object(client, 'metadata', side_effect=metadata), \
+                 patch.object(client, 'transaction', side_effect=transaction), \
                  patch.object(client, 'verify'), patch.object(client, 'installed', return_value={}), \
                  patch.object(fyhoct_install, 'configure', side_effect=configure):
                 client.execute('--list-software')
                 self.assertEqual(events, [])
+                client.execute('--install-fyhoct')
+                self.assertEqual(events, ['key', ['sckoct-fyh'], 'components'])
+                self.assertFalse((root/'files'/names[1]).exists())
+                self.assertFalse((root/'state/last-result.json').exists())
+                events.clear()
                 client.execute('--software')
-            self.assertEqual(events, ['key', 'rpm', 'components'])
+            self.assertEqual(events, [['other']])
             report = (root/'state/last-result.json').read_text()
-            self.assertTrue(json.loads(report)['fyhoct_components'])
+            self.assertEqual([p['name'] for p in json.loads(report)['copy_only_packages']], ['sckoct-fyh'])
             self.assertNotIn('K'*32, report)
 
     def test_package_files_persist_backfill_and_retry(self):

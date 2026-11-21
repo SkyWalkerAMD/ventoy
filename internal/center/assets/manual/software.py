@@ -577,8 +577,52 @@ def configure_nodes(client, family):
     return node_join.configure(nodes, set(name.split(':')[0] for name in installed(family)))
 
 
-def fyhoct_policy(enabled):
-    return tuple(name for name in COPY_ONLY_PACKAGES if not enabled or name != 'sckoct-fyh')
+def install_fyhoct(client, config, manifest, wanted, family):
+    import fyhoct_install
+    if config.get('fyhoct_install') is not True:
+        raise RuntimeError('FYHOCT installation is not configured on the center')
+    major = wanted['version'].split('.')[0]
+    if family == 'rpm' and int(major) < 8:
+        raise RuntimeError('FYHOCT requires Enterprise Linux 8 or newer')
+    policy = tuple(name for name in COPY_ONLY_PACKAGES if name != fyhoct_install.PACKAGE)
+    group = manifest['group']
+    prefix = fyhoct_install.PACKAGE + ('_' if family == 'deb' else '-')
+    files = [item for item in (group['files'] if group else [])
+             if item['path'].rsplit('/', 1)[-1].startswith(prefix)]
+    archives = [item for item in manifest.get('archives', []) + manifest.get('copy_files', [])
+                if item['path'] in fyhoct_install.COMPONENTS]
+    if not files:
+        raise RuntimeError('No matching sckoct-fyh package in the center tools library')
+    if set(item['path'] for item in archives) != set(fyhoct_install.COMPONENTS):
+        raise RuntimeError('FYHOCT component bundles are missing from the center tools library')
+    sync_archives(client, files, packages=True)
+    verify_archives(files)
+    candidates = []
+    for item in files:
+        path = os.path.join(ARCHIVES, item['path'].rsplit('/', 1)[-1])
+        package = metadata(path, family, wanted['arch'], policy)
+        if package['name'] != fyhoct_install.PACKAGE or not fyhoct_install.supported(package['version']):
+            continue
+        if family == 'rpm' and not re.search(r'\.el' + re.escape(major) + r'(?:[._-]|$)', package['version']):
+            continue
+        candidates.append(package)
+    if not candidates:
+        raise RuntimeError('No compatible sckoct-fyh 1.2.6 or newer package was found')
+    selected = select_latest(candidates, family, wanted['arch'])
+    sync_archives(client, archives)
+    verify_archives(archives)
+    key = fyhoct_install.load_key(client)
+    work = tempfile.mkdtemp(prefix='ventoy-fyhoct-', dir=STAGING)
+    try:
+        transaction(selected, family, work, policy=policy)
+        before_components = installed(family)
+        try:
+            fyhoct_install.configure(ARCHIVES, key)
+        finally:
+            verify(selected, family, before_components, policy)
+    finally:
+        shutil.rmtree(work)
+    print('FYHOCT_VERIFIED: engine and dependencies installed; kernel package set preserved.')
 
 
 def execute(mode):
@@ -589,15 +633,11 @@ def execute(mode):
             report = json.load(f)
         if report.get('status') != 'verified' or report.get('target') != wanted:
             raise RuntimeError('No successfully installed matching software group to verify')
-        policy = fyhoct_policy(report.get('fyhoct_components') is True)
-        if report.get('copy_only_policy') != list(policy):
+        if report.get('copy_only_policy') != list(COPY_ONLY_PACKAGES):
             raise RuntimeError('Software delivery policy changed; run setup --software before checking')
-        verify(report['packages'], family, policy=policy)
+        verify(report['packages'], family)
         verify_archives(report.get('archives', []))
         verify_archives(report.get('package_files', []))
-        if report.get('fyhoct_components'):
-            import fyhoct_install
-            fyhoct_install.check()
         if report.get('fyhoc_unlock'):
             import fyhoc_unlock
             fyhoc_unlock.check()
@@ -611,19 +651,20 @@ def execute(mode):
     with open(os.path.join(HERE, 'software-client.json')) as f:
         config = json.load(f)
     if not config.get('enabled'):
+        if mode == '--install-fyhoct':
+            raise RuntimeError('Controller software library is not configured')
         print('SKIPPED: controller software library is not configured.')
         return
     client = Client(config)
     manifest = client.manifest(wanted)
+    if mode == '--install-fyhoct':
+        install_fyhoct(client, config, manifest, wanted, family)
+        return
     group = manifest['group']
     archives = manifest.get('archives', []) + manifest.get('copy_files', [])
     files = group['files'] if group else []
     print('Default software group: %s (%s packages)' % (group['id'] if group else 'none', len(files)))
-    enabled = config.get('fyhoct_install') is True
-    if enabled:
-        import fyhoct_install
-    print('Copy-only packages: %s. FYHOCT automatic setup: %s.' %
-          (', '.join(fyhoct_policy(enabled)), 'enabled for sckoct-fyh 1.2.6+' if enabled else 'disabled'))
+    print('Copy-only packages: %s.' % ', '.join(COPY_ONLY_PACKAGES))
     for f in files:
         print('  %s  %s bytes  sha256=%s' % (f['path'].split('/')[-1], f['size'], f['sha256']))
     for f in archives:
@@ -642,18 +683,16 @@ def execute(mode):
         with open(previous) as f:
             last = json.load(f)
         if (last.get('status') == 'verified' and last.get('target') == wanted and
-                last.get('fyhoct_enabled', False) == enabled and
-                last.get('copy_only_policy') == list(fyhoct_policy(last.get('fyhoct_components') is True)) and
+                last.get('copy_only_policy') == list(COPY_ONLY_PACKAGES) and
                 last.get('manifest', {}).get('group') == group):
-            verify(last['packages'], family, policy=tuple(last['copy_only_policy']))
+            verify(last['packages'], family)
             unchanged = last['packages']
     except (IOError, ValueError, RuntimeError):
         pass
     work = tempfile.mkdtemp(prefix='ventoy-software-', dir=STAGING)
     report = dict(status='failed', target=wanted, group=group['id'] if group else None, manifest=manifest,
                   time=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), packages=[], archives=archives,
-                  package_files=files, copy_only_policy=list(COPY_ONLY_PACKAGES), copy_only_packages=[],
-                  fyhoct_enabled=enabled)
+                  package_files=files, copy_only_policy=list(COPY_ONLY_PACKAGES), copy_only_packages=[])
     node_join_attempted = False
     try:
         sync_archives(client, archives)
@@ -663,10 +702,9 @@ def execute(mode):
         candidates = []
         for item in (files if unchanged is None else []):
             dest = os.path.join(ARCHIVES, item['path'].split('/')[-1])
-            p = metadata(dest, family, wanted['arch'], fyhoct_policy(enabled))
+            p = metadata(dest, family, wanted['arch'])
             p['sha256'] = item['sha256']
-            if (copy_only(p['name'], fyhoct_policy(enabled)) or
-                    (enabled and p['name'] == fyhoct_install.PACKAGE and not fyhoct_install.supported(p['version']))):
+            if copy_only(p['name']):
                 report['copy_only_packages'].append(p)
                 continue
             if family == 'rpm':
@@ -679,28 +717,13 @@ def execute(mode):
         report['packages'] = select_latest(candidates, family, wanted['arch']) if unchanged is None else unchanged
         if unchanged is not None:
             report['copy_only_packages'] = last.get('copy_only_packages', [])
-        managed = enabled and any(p['name'] == fyhoct_install.PACKAGE for p in report['packages'])
-        policy = fyhoct_policy(managed)
-        report['copy_only_policy'] = list(policy)
-        if managed:
-            names = set(item['path'] for item in archives)
-            if not set(fyhoct_install.COMPONENTS).issubset(names):
-                raise RuntimeError('FYHOCT component bundles are missing from the center tools library')
-            fyhoct_key = fyhoct_install.load_key(client)
         for p in report['copy_only_packages']:
             print('COPY_ONLY: %s %s; retained, not installed or upgraded.' % (p['name'], p['version']))
-        changed = transaction(report['packages'], family, work, policy=policy) if report['packages'] and unchanged is None else 0
+        changed = transaction(report['packages'], family, work) if report['packages'] and unchanged is None else 0
         if not report['packages']:
             verify([], family)
         verify_archives(archives)
         verify_archives(files)
-        if managed:
-            before_components = installed(family)
-            try:
-                fyhoct_install.configure(ARCHIVES, fyhoct_key)
-            finally:
-                verify(report['packages'], family, before_components, policy)
-            report['fyhoct_components'] = True
         policy = os.path.join(HERE, 'linux-update-policy.sh')
         if os.path.isdir('/var/lib/ventoy-center/kernel-policy'):
             run(['sh', policy, '--check'], echo=True)
@@ -738,8 +761,8 @@ def execute(mode):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ('--software', '--list-software', '--check-software'):
-        raise RuntimeError('Use setup --software, --list-software or --check-software')
+    if len(sys.argv) != 2 or sys.argv[1] not in ('--software', '--list-software', '--check-software', '--install-fyhoct'):
+        raise RuntimeError('Use setup --software, --list-software, --check-software or --install-fyhoct')
     if os.geteuid() != 0:
         raise RuntimeError('Run as root or sudo')
     os.umask(0o077)

@@ -2,8 +2,8 @@
 
 ## 0.3.0-alpha.62 — 2026-11-21
 
-- Allow a center-configured FYHOCT installation key to enable automatic
-  installation of matching sckoct-fyh 1.2.6+ packages and encrypted components.
+- Add the explicit `--install-fyhoct` command for matching sckoct-fyh 1.2.6+
+  packages and encrypted components. Standard setup retains the package as a file.
 
 ## 0.3.0-alpha.61 — 2026-11-21
 
