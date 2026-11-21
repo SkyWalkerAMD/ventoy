@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Ventoy Center complete manual-install configuration package.
 set -Eeuo pipefail
-# Keep setup and child-tool diagnostics in English without changing the system
-# locale or the locale of the refreshed interactive shell.
+# Keep setup and child-tool diagnostics in English without changing the caller.
 setup_locale_set=${LC_ALL+x}
 setup_user_locale=${LC_ALL-}
 export LC_ALL=C
@@ -46,8 +45,8 @@ if [[ ${1:-} == --upgrade ]]; then
     set -- --upgrade
 fi
 hostname_before=$(hostname)
-refresh_prompt=1
-case "${1:-}" in --check|--resume|--software|--list-software|--check-software|--restore-user-login|--check-login) refresh_prompt=0;; esac
+interactive_apply=1
+case "${1:-}" in --check|--resume|--software|--list-software|--check-software|--restore-user-login|--check-login) interactive_apply=0;; esac
 python=
 for candidate in python3 /usr/libexec/platform-python python2 python; do
     if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (2,7) else 1)' 2>/dev/null; then
@@ -105,7 +104,7 @@ case "${1:-}" in
 esac
 bash "$stage/ventoy-manual-setup/install.sh" "$@" || setup_rc=$?
 case "${1:-}" in --restore-user-login|--check-login) exit "$setup_rc";; esac
-if (( (setup_rc == 0 || setup_rc == 3 || setup_rc == 4) && refresh_prompt)) && [[ -t 0 && -t 1 && -t 2 ]]; then
+if (( (setup_rc == 0 || setup_rc == 3 || setup_rc == 4) && interactive_apply)) && [[ -t 0 && -t 1 && -t 2 ]]; then
     # Status 4 means system checks reached the software step, which failed.
     # That independent failure must not hide the optional password dialog.
     password_rc=0
@@ -118,38 +117,11 @@ case "$setup_rc" in
     4) echo 'SETUP_SUMMARY: software failed. Review pending system checks above; retry --software after fixing the reported package error';;
     *) echo "SETUP_SUMMARY: incomplete (exit $setup_rc). Inspect the first failed stage before retrying";;
 esac
-# A child cannot replace its caller's cached Bash hostname. After a verified
-# interactive rename, use a fresh shell on this same terminal. Never put a
-# background/service/check invocation into an interactive shell, and clean the
-# extraction directory before opening the refreshed shell.
-hostname_after=$(hostname)
-rm -rf -- "$stage"
-trap - EXIT
-if (((setup_rc == 0 || setup_rc == 3 || setup_rc == 4) && refresh_prompt)) && [[ -t 0 && -t 1 && -t 2 &&
-        "$hostname_before" != "$hostname_after" ]]; then
-    pgid=$(ps -o pgid= -p "$$" | tr -d ' ')
-    foreground=$(ps -o tpgid= -p "$$" | tr -d ' ')
-    if [[ -n "$pgid" && "$pgid" == "$foreground" ]]; then
-        echo "HOSTNAME_VERIFIED: $hostname_after; opening a refreshed interactive Bash prompt."
-        if ((setup_rc)); then
-            echo "SETUP_INCOMPLETE: exit status $setup_rc is retained; refreshing the prompt does not resolve the errors above." >&2
-        fi
-        parent_command=$(ps -o comm= -p "$PPID" | tr -d ' ')
-        parent_uid=$(ps -o ruid= -p "$PPID" | tr -d ' ')
-        restore_user_locale
-        if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != root &&
-                ( "$parent_command" == sudo || "$parent_uid" == "${SUDO_UID:-}" ) ]]; then
-            # A sudo invocation must return to the invoking account, not leave
-            # an unexpected root shell open. Verify sudo's recorded identity.
-            if [[ $(id -u "$SUDO_USER") == "${SUDO_UID:-}" ]] && command -v runuser >/dev/null 2>&1; then
-                runuser -u "$SUDO_USER" -- /bin/bash -i || true
-                exit "$setup_rc"
-            fi
-            echo 'Hostname is active. Run exec bash in your current account to refresh its prompt.'
-        else
-            /bin/bash -i || true
-            exit "$setup_rc"
-        fi
+# Return control to the original login. A nested shell would keep both setup
+# and a local console session open while waiting for a second exit.
+if (((setup_rc == 0 || setup_rc == 3 || setup_rc == 4) && interactive_apply)) && [[ -t 0 && -t 1 && -t 2 ]]; then
+    if hostname_after=$(hostname) && [[ "$hostname_before" != "$hostname_after" ]]; then
+        echo "HOSTNAME_VERIFIED: $hostname_after. To refresh a cached Bash prompt, run exec bash in your current shell."
     fi
 fi
 exit "$setup_rc"
