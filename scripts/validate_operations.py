@@ -135,6 +135,28 @@ class Lifecycle(unittest.TestCase):
             release.Release.restore_network(self.r,{'status':'ready'})
             native.assert_called_once_with('query_status')
 
+    def test_dual_stack_snapshot_and_fallback_use_native_selection(self):
+        self.r.cfg['public_url']='https://center.example.test:26080'
+        ipv4=dict(ip='192.0.2.10',mask='255.255.255.0',gw='192.0.2.1',
+                  pool_begin='',pool_end='',dns_server='')
+        ipv6=dict(ip='2001:db8::10',choose=True)
+        addresses=dict(ipv4_enable=True,ipv6_enable=True,
+                       ipv4_list=[dict(ip='192.0.2.20',choose=False),dict(ipv4,choose=True)],
+                       ipv6_list=[ipv6])
+        expected=dict(status='running',start=dict(ipv4,ip6=ipv6['ip'],dns6=''))
+        with mock.patch.object(self.r,'native',side_effect=[{'status':'running'},addresses]):
+            self.assertEqual(release.Release.network_snapshot(self.r),expected)
+        with mock.patch.object(self.r,'native',side_effect=[
+            {'status':'ready'},{'result':'success'},{'status':'running'},addresses,
+        ]) as native, mock.patch.object(release.time,'sleep'):
+            release.Release.restore_network(self.r,expected)
+            self.assertIn(mock.call('start_server',**expected['start']),native.call_args_list)
+        with mock.patch.object(self.r,'native',side_effect=[
+            {'status':'running'},dict(addresses,ipv6_enable=False),
+        ]):
+            with self.assertRaisesRegex(RuntimeError,'did not restore'):
+                release.Release.restore_network(self.r,expected)
+
     def test_failed_pxe_restore_rolls_back(self):
         self.r.restore_network.side_effect=[RuntimeError('PXE not running'),None]
         with self.assertRaisesRegex(RuntimeError,'PXE not running'):self.r.activate()
