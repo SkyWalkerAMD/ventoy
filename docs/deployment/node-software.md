@@ -33,6 +33,24 @@ tools 根目录中的压缩包、独立工具和其他普通文件原样保存�
 
 ## 节点执行
 
+运行 `bash ./ventoy-linux-setup.run --help` 查看完整命令、选项和示例。`-h` 和 `help` 也可使用。
+
+### 卸载
+
+```bash
+sudo bash ./ventoy-linux-setup.run --uninstall
+# 指定 Ubuntu / Debian 上用于恢复登录的账号
+sudo bash ./ventoy-linux-setup.run --uninstall --login-user myadmin
+# 已经使用旧版 setup 安装软件的节点，预览并确认旧记录里的匹配软件包
+sudo bash ./ventoy-linux-setup.run --uninstall --include-legacy-packages
+```
+
+卸载先列出软件包和文件数量，输入 `yes` 才执行。Ubuntu / Debian 会验证普通用户的 SSH 密码登录和 sudo，再禁用 root SSH 和控制台密码登录。卸载会停止 setup 恢复与 FYHOC 解锁服务，移除受管软件包、未改动的已传输文件、setup 本体和已保存的 setup 副本。旧记录没有记录软件包的初始归属，`--include-legacy-packages` 需要认真核对预览。它也会列出已安装且与旧报告中保留版本相同的 `sckoct-fyh`。
+
+原有软件包和后来被外部升级过的包默认保留。卸载保留 SSH、sudo、Python、共享依赖和现有网络、驱动及内核策略。用户后来修改的 tools 文件保留。
+
+### 安装与检查
+
 alpha.31 的预置流程在普通手动安装和 PXE 自动安装结束时，将新版文件放在 `/root/ventoy-linux-setup.run`，无需另行下载。安装器只复制并校验文件，不执行软件安装。已安装的旧系统不会被远程改写，可从管理端下载新版后替换一次。
 
 ```bash

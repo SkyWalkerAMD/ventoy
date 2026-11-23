@@ -477,6 +477,33 @@ def transaction(packages, family, work, allow_dependencies=True, policy=COPY_ONL
     return len(pending)
 
 
+def read_state(name, default):
+    try:
+        with open(os.path.join(STATE, name)) as f:
+            return json.load(f)
+    except IOError as error:
+        if error.errno != 2:
+            raise
+        return default
+
+
+def tracked_transaction(packages, family, work, policy=COPY_ONLY_PACKAGES):
+    before = installed(family)
+    owned = read_state('installed-by-setup.json', {})
+    try:
+        return transaction(packages, family, work, policy=policy)
+    finally:
+        after = installed(family)
+        updated = dict(owned)
+        for package in packages:
+            key = package['name'] + ':' + package['arch']
+            if key in after and (key not in before or
+                                 (key in owned and owned[key] == before.get(key))):
+                updated[key] = after[key]
+        if updated != owned:
+            save_json(updated, 'installed-by-setup.json')
+
+
 def save_report(data):
     save_json(data, 'last-result.json')
 
@@ -614,7 +641,7 @@ def install_fyhoct(client, config, manifest, wanted, family):
     key = fyhoct_install.load_key(client)
     work = tempfile.mkdtemp(prefix='ventoy-fyhoct-', dir=STAGING)
     try:
-        transaction(selected, family, work, policy=policy)
+        tracked_transaction(selected, family, work, policy=policy)
         before_components = installed(family)
         try:
             fyhoct_install.configure(ARCHIVES, key)
@@ -719,7 +746,7 @@ def execute(mode):
             report['copy_only_packages'] = last.get('copy_only_packages', [])
         for p in report['copy_only_packages']:
             print('COPY_ONLY: %s %s; retained, not installed or upgraded.' % (p['name'], p['version']))
-        changed = transaction(report['packages'], family, work) if report['packages'] and unchanged is None else 0
+        changed = tracked_transaction(report['packages'], family, work) if report['packages'] and unchanged is None else 0
         if not report['packages']:
             verify([], family)
         verify_archives(archives)

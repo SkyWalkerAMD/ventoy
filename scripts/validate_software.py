@@ -32,6 +32,33 @@ class Boundaries(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    @unittest.skipUnless((source.parent / 'uninstall.py').is_file(), 'requires full setup source')
+    def test_uninstall_selects_owned_packages_and_unchanged_files(self):
+        import uninstall
+        wanted = dict(os='ubuntu', version='24.04', arch='amd64')
+        before = {'existing:amd64': '1'}
+        after = dict(before, **{'owned:amd64': '1'})
+        packages = [dict(name=name, arch='amd64') for name in ('owned', 'existing')]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(client, 'STATE', tmp), patch.object(uninstall, 'software', client):
+                with patch.object(client, 'installed', side_effect=[before, after]), patch.object(client, 'transaction'):
+                    client.tracked_transaction(packages, 'deb', tmp)
+                self.assertEqual(uninstall.package_targets(after, wanted, False), [('owned', 'amd64')])
+                self.assertEqual(uninstall.package_targets(dict(after, **{'owned:amd64': '2'}), wanted, False), [])
+                client.save_report(dict(target=wanted, packages=[dict(name='existing', version='1', arch='amd64')]))
+                self.assertEqual(uninstall.package_targets(after, wanted, True), [('existing', 'amd64'), ('owned', 'amd64')])
+                payload = b'managed'
+                item = dict(path='tool.sh', size=len(payload), sha256=hashlib.sha256(payload).hexdigest())
+                client.save_json({'tool.sh': item}, 'archive-state.json')
+                (root/'tool.sh').write_bytes(payload)
+                with patch.object(client, 'ARCHIVES', os.path.realpath(tmp)):
+                    self.assertEqual(uninstall.managed_archives(), [item])
+                    (root/'tool.sh').write_bytes(b'edited')
+                    self.assertEqual(uninstall.managed_archives(), [])
+        self.assertEqual(uninstall.removal_commands('deb', [('owned', 'amd64')])[1],
+                         ['dpkg', '--remove', 'owned:amd64'])
+
     @unittest.skipUnless((source.parent / 'fyhoct_install.py').is_file(), 'requires full setup source')
     def test_fyhoct_receives_verified_bundles_and_key_after_package_install(self):
         import fyhoct_install

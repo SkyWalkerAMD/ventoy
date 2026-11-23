@@ -11,22 +11,59 @@ restore_user_locale() {
 umask 077
 if [[ ${1:-} == --version ]]; then echo 'Ventoy setup @SETUP_VERSION@'; exit 0; fi
 if (($# == 0)); then set -- --apply; fi
-if [[ ${1:---help} == --help || ${1:-} == -h ]]; then
-    echo 'Usage: sudo ./ventoy-linux-setup.run [--hostname NAME] [--offline] [--keep-passwords]'
-    echo 'Run after installing and booting Linux. Default credentials: user / ventoy, root / ventoy.'
-    echo 'No arguments applies and verifies SSH, hostname, DHCP, kernel locking, disabled automatic updates, and matching software.'
-    echo 'Interactive full setup asks for hostname and an optional new root password (twice, hidden); Enter keeps the current value.'
-    echo '--apply remains a compatible alias; --offline skips software downloads.'
-    echo 'Software only: sudo ./ventoy-linux-setup.run --software'
-    echo 'Optional FYHOCT install and initialization: --install-fyhoct'
-    echo 'Inspect/verify: --check / --list-software / --check-software'
-    echo 'Optional Ubuntu/Debian user + sudo login: --restore-user-login [--login-user user]'
-    echo 'This verifies the ordinary user password, then disables root SSH and console password login; --check-login checks the saved policy.'
-    echo 'Installation defaults stay root-enabled. A restored user-only choice persists across setup and upgrades.'
-    echo 'Upgrade and apply current center setup: --upgrade [--hostname NAME] [--keep-passwords]'
-    echo 'Runner version: --version / --check-version. Download only: --update-setup (rerun afterward).'
-    exit 0
-fi
+case "$1" in
+    --help|-h|help)
+        printf 'Ventoy Linux setup %s\n\n' '@SETUP_VERSION@'
+        cat <<'HELP'
+Usage: bash ./ventoy-linux-setup.run --help
+       sudo bash ./ventoy-linux-setup.run [COMMAND] [OPTIONS]
+
+System configuration
+  (no command), --apply       Configure hostname, SSH, accounts, DHCP, E610
+                              when needed, kernel locks and update policy.
+                              Install and verify the default software group.
+  --hostname NAME             Set a hostname during full setup.
+  --keep-passwords            Keep existing account passwords during setup.
+  --offline                   Skip software downloads during full setup.
+  --check                     Verify the applied system configuration.
+
+Software
+  --list-software             List packages and files matched by the center.
+  --software                  Install or update the default software group.
+  --check-software            Verify the last installed group and saved files.
+  --install-fyhoct             Install sckoct-fyh and initialize its components.
+
+Ubuntu and Debian login
+  --restore-user-login [--login-user NAME]
+                              Verify ordinary-user SSH and sudo, then disable
+                              direct root SSH and console password login.
+  --check-login               Verify the saved ordinary-user login policy.
+
+Setup updates and removal
+  --version                   Print the local setup version.
+  --check-version             Check the version published by the center.
+  --update-setup              Download and replace this setup file.
+  --upgrade [--hostname NAME] [--keep-passwords]
+                              Update setup and apply the current version.
+  --uninstall [--login-user NAME] [--include-legacy-packages]
+                              Preview and confirm removal of setup-managed
+                              packages, scripts and transferred files.
+                              On Ubuntu/Debian, verify an ordinary sudo login
+                              before disabling direct root login.
+  --include-legacy-packages   Include matching packages from the old software
+                              report in the uninstall preview.
+  --help, -h, help             Print this guide offline without root.
+
+Examples
+  sudo bash ./ventoy-linux-setup.run --hostname server01
+  sudo bash ./ventoy-linux-setup.run --list-software
+  sudo bash ./ventoy-linux-setup.run --uninstall --login-user admin
+
+Exit codes: 0 completed, 1 failed, 2 invalid input, 3 system checks pending,
+            4 system configuration checked with a software failure.
+HELP
+        exit 0;;
+esac
 [[ $EUID == 0 ]] || { echo 'Run with root or sudo.' >&2; exit 1; }
 # Validate upgrade options before contacting the center. Offline/check modes
 # must never silently turn into an online full setup.
@@ -86,6 +123,10 @@ PY
 setup_rc=0
 echo 'Ventoy setup @SETUP_VERSION@'
 case "${1:-}" in
+    --uninstall)
+        export VENTOY_UNINSTALL_RUNNER="$0"
+        bash "$stage/ventoy-manual-setup/install.sh" "$@"
+        exit $?;;
     --check-version|--update-setup)
         (($# == 1)) || { echo 'This action takes no additional arguments.' >&2; exit 2; }
         "$python" "$stage/ventoy-manual-setup/setup-release.py" "$1" "$0"

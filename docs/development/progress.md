@@ -1,5 +1,20 @@
 # Ventoy Center 当前进度
 
+## alpha.64 与 iVentoy 1.0.50 Pro（2026-11-23）
+
+当前部署运行 **Ventoy Center 0.3.0-alpha.64** 和 **iVentoy 1.0.50 Pro**。
+本次升级验证了专业版授权、两个服务的运行状态、60 个镜像的绑定和
+53 个 Linux 手动／自动共享入口。备份、回读结果和实机验收范围见
+[iVentoy 升级记录](../deployment/iventoy-upgrade.md)。
+
+- `alpha.63` 为 setup 增加显式 `--uninstall`，预览并移除受管软件、脚本和传输文件。
+  Ubuntu／Debian 会先验证普通用户的 SSH 和 sudo，再关闭 root 直登。
+- `alpha.64` 增加 `help` 写法，并补全英文帮助的命令、示例和退出码。
+  线上脚本已核对 `--help`、`-h` 和 `help`，53 个 Linux 预置包已发布。
+
+已清理结束实验的 QA 虚拟磁盘、失败发布的临时文件和旧发布快照。近期版本的
+回滚备份通过摘要校验。节点用法见[软件与卸载说明](../deployment/node-software.md)。
+
 ## alpha.58、Debian 13.7 与 Z790 引导验收（2026-11-08）
 
 中心 `192.168.1.2` 已发布 **0.3.0-alpha.58**，iVentoy 为 **1.0.49 Pro**。
