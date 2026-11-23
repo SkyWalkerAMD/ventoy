@@ -146,12 +146,33 @@ class Release:
             raise RuntimeError('iVentoy network is transitioning; publication deferred')
         snapshot = dict(status=status)
         if status == 'running':
-            host = urlsplit(self.cfg['public_url']).hostname
-            networks = [n for n in self.native('sys_ip_list') if n.get('ip') == host]
-            if len(networks) != 1:
-                raise RuntimeError('Cannot uniquely preserve the iVentoy network interface')
-            snapshot['start'] = {k: networks[0][k] for k in ('ip', 'mask', 'gw', 'pool_begin', 'pool_end', 'dns_server')}
+            snapshot['start'] = self.network_start()
         return snapshot
+
+    def network_start(self):
+        fields = ('ip', 'mask', 'gw', 'pool_begin', 'pool_end', 'dns_server')
+        addresses = self.native('sys_ip_list')
+        if isinstance(addresses, list):
+            host = urlsplit(self.cfg['public_url']).hostname
+            selected = [row for row in addresses if row.get('ip') == host]
+            if len(selected) != 1:
+                raise RuntimeError('Cannot uniquely preserve the iVentoy network interface')
+            return {key: selected[0][key] for key in fields}
+
+        def selected_address(version):
+            if not addresses['ipv%d_enable' % version]:
+                return {}
+            selected = [row for row in addresses['ipv%d_list' % version] if row.get('choose')]
+            if len(selected) != 1 or not selected[0].get('ip'):
+                raise RuntimeError('Cannot uniquely preserve the iVentoy IPv%d interface' % version)
+            return selected[0]
+
+        ipv4 = selected_address(4)
+        ipv6 = selected_address(6)
+        if not (ipv4 or ipv6):
+            raise RuntimeError('iVentoy reports running without an enabled IP interface')
+        return dict({key: ipv4.get(key, '') for key in fields},
+                    ip6=ipv6.get('ip', ''), dns6=ipv6.get('dns_server', ''))
 
     def restore_network(self, snapshot):
         # systemd active only means the web process is alive; PXE may be ready.
@@ -164,6 +185,11 @@ class Release:
                 time.sleep(.5)
                 continue
             if status == snapshot['status']:
+                start = snapshot.get('start', {})
+                if status == 'running' and 'ip6' in start:
+                    restored = self.network_start()
+                    if (restored['ip'], restored['ip6']) != (start['ip'], start['ip6']):
+                        raise RuntimeError('iVentoy did not restore the saved IPv4/IPv6 interfaces')
                 return
             if not changed and status in ('ready', 'running'):
                 action = 'start_server' if snapshot['status'] == 'running' else 'stop_server'

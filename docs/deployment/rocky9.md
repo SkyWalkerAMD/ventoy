@@ -71,7 +71,7 @@ sudo journalctl -u ventoy-center -n 50 --no-pager
 
 ## 4. 准备安装目标
 
-按 [Linux 安装版本](linux-targets.md)选择实际镜像和系统 profile。新任务只安装操作系统，不需要在 fyhocsys 登记节点、准备节点包、导入连接文件或修改其现有配置。`package_dir` / `fyhocsys_url` 保留为旧配置兼容字段，当前部署流程不使用。
+按 [Linux 安装版本](linux-targets.md)选择实际镜像和系统 profile。操作系统安装和 fyhocsys 节点接入可独立部署。生成 Linux setup 或预置包时，将[指定版本的 E610 离线包](manual-linux.md#检查结果和边界)放入 `package_dir`。节点 RPM / DEB 则由 `software_dir` 分发，接入配置见[节点软件分发](node-software.md)。
 
 Debian 模板需要显式配置 `bootstrap_ca_file`，并保证客户端可访问 Debian 镜像源。使用 CentOS/Rocky 完整 DVD ISO，Ubuntu 使用对应版本的 live-server ISO。
 
