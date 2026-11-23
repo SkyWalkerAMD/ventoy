@@ -7,23 +7,24 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 state=/var/lib/ventoy-center/manual-init
 mode=--apply
 case "${1:-}" in
-    --apply|--resume|--check|--software|--list-software|--check-software|--install-fyhoct|--restore-user-login|--check-login|--help|-h)
+    --apply|--resume|--check|--software|--list-software|--check-software|--install-fyhoct|--uninstall|--restore-user-login|--check-login|--help|-h)
         mode=$1; shift;;
 esac
-name=; offline=0; keep_passwords=0; login_user=
+name=; offline=0; keep_passwords=0; login_user=; legacy=0
 die() { echo "Manual setup: $*" >&2; exit 1; }
 while (($#)); do
     case "$1" in
         --hostname) (($# >= 2)) || exit 2; name=$2; shift;;
         --offline) offline=1;;
         --keep-passwords) keep_passwords=1;;
+        --include-legacy-packages) legacy=1;;
         --login-user) (($# >= 2)) && [[ -n $2 && $2 != -* ]] || exit 2; login_user=$2; shift;;
         *) die "Unknown argument: $1";;
     esac
     shift
 done
 case "$mode" in
-    --apply|--resume|--check|--software|--list-software|--check-software|--install-fyhoct|--restore-user-login|--check-login) ;;
+    --apply|--resume|--check|--software|--list-software|--check-software|--install-fyhoct|--uninstall|--restore-user-login|--check-login) ;;
     --help|-h)
         cat <<'HELP'
 sudo ./ventoy-linux-setup.run [--hostname NAME] [--offline] [--keep-passwords]
@@ -33,6 +34,7 @@ sudo bash ventoy-linux-setup.run --software
 sudo bash ventoy-linux-setup.run --list-software
 sudo bash ventoy-linux-setup.run --check-software
 sudo bash ventoy-linux-setup.run --install-fyhoct
+sudo bash ventoy-linux-setup.run --uninstall [--login-user user] [--include-legacy-packages]
 sudo bash ventoy-linux-setup.run --restore-user-login [--login-user user]
 sudo bash ventoy-linux-setup.run --check-login
 
@@ -65,12 +67,21 @@ Optional Ubuntu/Debian action --restore-user-login verifies an existing user's
 password SSH login and sudo, then disables root SSH and console password login.
 It changes no passwords or software. Future setup/upgrade runs retain this choice.
 New installations still allow direct root login by default. --check-login is read-only.
+--uninstall previews and removes setup-owned packages and files after confirmation.
+On Ubuntu/Debian it verifies an ordinary user's SSH and sudo before disabling direct root login.
+--include-legacy-packages also offers matching packages from the old software report.
 HELP
         exit 0;;
     *) exit 2;;
 esac
-if [[ -n $login_user && $mode != --restore-user-login ]]; then
-    die '--login-user requires --restore-user-login.'
+if [[ -n $login_user && $mode != --restore-user-login && $mode != --uninstall ]]; then
+    die '--login-user requires --restore-user-login or --uninstall.'
+fi
+if [[ $legacy == 1 && $mode != --uninstall ]]; then
+    die '--include-legacy-packages requires --uninstall.'
+fi
+if [[ $mode == --uninstall ]]; then
+    [[ -z $name && $offline == 0 && $keep_passwords == 0 ]] || die 'Uninstall cannot be combined with full-setup options.'
 fi
 if [[ $mode == --restore-user-login || $mode == --check-login ]]; then
     [[ -z $name && $offline == 0 && $keep_passwords == 0 ]] || die 'Login actions cannot be combined with full-setup options.'
@@ -96,6 +107,18 @@ mkdir -p "$state"
 exec 7>"$state/lock"
 flock -n 7 || die 'Another setup/check is running.'
 case "$mode" in
+    --uninstall)
+        (cd "$here" && sha256sum --status -c SHA256SUMS) || die 'Package integrity check failed.'
+        uninstall_args=("${VENTOY_UNINSTALL_RUNNER:-}")
+        [[ -z $login_user ]] || uninstall_args+=(--login-user "$login_user")
+        [[ $legacy == 0 ]] || uninstall_args+=(--include-legacy-packages)
+        for python in python3 /usr/libexec/platform-python python2 python; do
+            if command -v "$python" >/dev/null && "$python" -c 'import fcntl' 2>/dev/null; then
+                "$python" "$here/uninstall.py" "${uninstall_args[@]}"
+                exit $?
+            fi
+        done
+        die 'Uninstall requires Python.';;
     --restore-user-login|--check-login)
         [[ $family == apt ]] || die 'This optional login mode is only for Ubuntu and Debian.'
         (cd "$here" && sha256sum --status -c SHA256SUMS) || die 'Package integrity check failed.'

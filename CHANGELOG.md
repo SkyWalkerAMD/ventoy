@@ -1,5 +1,14 @@
 # 开发记录
 
+## 0.3.0-alpha.64 — 2026-11-22
+
+- Expand setup help with command groups, examples, exit codes, and a `help` alias.
+
+## 0.3.0-alpha.63 — 2026-11-22
+
+- Add an explicit setup uninstall command for managed software and files, with
+  verified ordinary-user login on Ubuntu and Debian before disabling root login.
+
 ## 0.3.0-alpha.62 — 2026-11-21
 
 - Add the explicit `--install-fyhoct` command for matching sckoct-fyh 1.2.6+
