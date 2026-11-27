@@ -4,6 +4,7 @@ from __future__ import print_function
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -13,6 +14,21 @@ from fyhoc_unlock import password_bytes, trusted_binary
 
 PACKAGE = 'sckoct-fyh'
 COMPONENTS = ('oc-engine-linux.tar.gz.enc', 'oc-deps-linux.tar.gz.enc')
+BACKEND_CONFIG = '/etc/fyhoct/fyhoct.conf'
+INSTALL_ERRORS = {
+    65: 'component key or archive compatibility check failed',
+    66: 'a required local component archive was not accepted',
+    69: 'required host dependencies or the container runtime are unavailable',
+    75: 'the operation is busy or temporarily unavailable',
+    77: 'the host denied an operation required by the installer',
+}
+READINESS_REASONS = {
+    'program_incomplete': 'program files are incomplete',
+    'engine_missing': 'engine is missing',
+    'deps_missing': 'dependencies are missing',
+    'lockdown': 'kernel lockdown is active',
+    'platform_unsupported': 'the platform is not supported for this operation',
+}
 
 
 def supported(version):
@@ -48,9 +64,11 @@ def call(binary, args, timeout, directory='/', key=None, read_result=False):
             while proc.poll() is None and time.time() < deadline:
                 time.sleep(0.1)
             if proc.poll() is None:
-                raise RuntimeError('FYHOCT command timed out')
+                raise RuntimeError('FYHOCT %s timed out' % args[0])
             if proc.returncode:
-                raise RuntimeError('FYHOCT command failed (exit %s)' % proc.returncode)
+                hint = INSTALL_ERRORS.get(proc.returncode) if args[0] == 'install' else None
+                raise RuntimeError('FYHOCT %s failed (exit %s)%s; see /var/log/fyhoct' %
+                                   (args[0], proc.returncode, ': ' + hint if hint else ''))
             if read_result:
                 output.seek(0)
                 return output.read(1024 * 1024 + 1)
@@ -60,25 +78,76 @@ def call(binary, args, timeout, directory='/', key=None, read_result=False):
                 proc.wait()
 
 
-def ready(binary):
+def backend():
+    value = None
     try:
-        data = json.loads(call(binary, ['api', 'ready', '--api', '1'], 90,
-                               read_result=True).decode('utf-8'))
-        components = data['data']['components']
-        return (data.get('ok') is True and components.get('engine') is True
-                and components.get('deps') is True)
-    except (ValueError, KeyError, AttributeError, TypeError, RuntimeError):
-        return False
+        with open(BACKEND_CONFIG) as config:
+            for line in config:
+                if line.startswith('FYHOCT_BACKEND='):
+                    value = line.split('=', 1)[1].strip().strip('\"\'')
+    except IOError:
+        pass
+    return {'native': 'native', 'tain': 'tain', 'container': 'tain', 'rootfs': 'rootfs'}.get(value)
+
+
+def readiness(binary):
+    raw = call(binary, ['api', 'ready', '--api', '1'], 90, read_result=True)
+    try:
+        envelope = json.loads(raw.decode('utf-8'))
+        data = envelope['data']
+        if (envelope.get('ok') is True and isinstance(data.get('ready'), bool)
+                and isinstance(data.get('components'), dict)):
+            return data
+    except (ValueError, KeyError, AttributeError, TypeError):
+        pass
+    raise RuntimeError('FYHOCT returned an invalid readiness response; see /var/log/fyhoct')
+
+
+def missing_components(data):
+    return any(data['components'].get(name) is not True for name in ('engine', 'deps'))
+
+
+def container_running():
+    raw = call(trusted_binary('fyhoct-tain'), ['api-state'], 30, read_result=True)
+    lines = raw.splitlines()
+    return b'running=1' in lines and b'image=1' in lines
 
 
 def configure(directory, key):
     binary = trusted_binary('fyhoct')
-    if not ready(binary):
-        call(binary, ['install', '--yes', '--engine', os.path.join(directory, COMPONENTS[0])],
-             900, directory, key)
-    check()
+    try:
+        current = backend()
+        initialized = bool(current) and not missing_components(readiness(binary))
+        if initialized and current == 'tain':
+            initialized = container_running()
+    except (RuntimeError, OSError):
+        initialized = False
+    if not initialized:
+        print('FYHOCT_INSTALL: initializing the engine and dependencies with the official installer.')
+        # FYHOCT picks the deps archive from its working directory. Supply
+        # only the two verified releases there so older matching tools files
+        # cannot be picked ahead of the intended archive.
+        work = tempfile.mkdtemp(prefix='.ventoy-fyhoct-', dir=directory)
+        try:
+            for name in COMPONENTS:
+                os.link(os.path.join(directory, name), os.path.join(work, name))
+            call(binary, ['install', '--yes', '--engine', os.path.join(work, COMPONENTS[0])],
+                 900, work, key)
+        finally:
+            shutil.rmtree(work)
+    check(binary)
 
 
-def check():
-    if not ready(trusted_binary('fyhoct')):
-        raise RuntimeError('FYHOCT engine or dependencies are not ready; rerun setup --install-fyhoct')
+def check(binary):
+    data = readiness(binary)
+    if data['ready'] is not True or missing_components(data):
+        reasons = data.get('blocked_by')
+        details = [message for code, message in sorted(READINESS_REASONS.items())
+                   if isinstance(reasons, list) and code in reasons]
+        raise RuntimeError('FYHOCT is not ready: %s; see /var/log/fyhoct' %
+                           (', '.join(details) or 'the official readiness check did not pass'))
+    current = backend()
+    if not current:
+        raise RuntimeError('FYHOCT did not save a supported backend; see /var/log/fyhoct')
+    if current == 'tain' and not container_running():
+        raise RuntimeError('FYHOCT dependency image or container is not running; see /var/log/fyhoct')

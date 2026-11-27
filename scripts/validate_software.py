@@ -32,6 +32,47 @@ class Boundaries(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    @unittest.skipUnless((source.parent / 'fyhoct_install.py').is_file(), 'requires FYHOCT setup source')
+    def test_fyhoct_uses_only_matched_bundles(self):
+        import fyhoct_install as fy
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(fy, 'trusted_binary', return_value='/usr/bin/fyhoct'), \
+             patch.object(fy, 'backend', side_effect=[None, 'tain']), \
+             patch.object(fy, 'readiness', return_value={'ready': True, 'components': {'engine': True, 'deps': True}}), \
+             patch.object(fy, 'container_running', return_value=True):
+            root = Path(tmp)
+            for name in fy.COMPONENTS + ('aaa-oc-deps-old.tar.gz.enc',):
+                (root / name).write_text(name)
+
+            def install(binary, args, timeout, directory, key):
+                work = Path(directory)
+                self.assertEqual(Path(args[-1]), work / fy.COMPONENTS[0])
+                self.assertEqual(tuple(sorted(p.name for p in work.iterdir())), tuple(sorted(fy.COMPONENTS)))
+                for name in fy.COMPONENTS:
+                    self.assertEqual((work / name).read_text(), name)
+
+            with patch.object(fy, 'call', side_effect=install) as run:
+                fy.configure(tmp, 'K'*32)
+            run.assert_called_once()
+            self.assertEqual(len(list(root.iterdir())), 3)
+
+    @unittest.skipUnless((source.parent / 'fyhoct_install.py').is_file(), 'requires FYHOCT setup source')
+    def test_fyhoct_does_not_report_blocked_components_as_usable(self):
+        import fyhoct_install as fy
+
+        data = {'ready': False, 'components': {'engine': True, 'deps': True}, 'blocked_by': ['lockdown']}
+        with patch.object(fy, 'trusted_binary', return_value='/usr/bin/fyhoct'), \
+             patch.object(fy, 'backend', return_value='native'), patch.object(fy, 'readiness', return_value=data), \
+             patch.object(fy, 'call') as run:
+            with self.assertRaisesRegex(RuntimeError, 'kernel lockdown is active'):
+                fy.configure('/unused', 'K'*32)
+            run.assert_not_called()
+        data['ready'] = True
+        with patch.object(fy, 'backend', return_value='tain'), patch.object(fy, 'readiness', return_value=data), \
+             patch.object(fy, 'container_running', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'image or container is not running'):
+                fy.check('/usr/bin/fyhoct')
+
     def test_download_reports_large_file_progress(self):
         data = b'x' * (10 * 1024**2)
         item = dict(path='group/large.tgz', size=len(data), sha256=hashlib.sha256(data).hexdigest())

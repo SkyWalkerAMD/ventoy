@@ -1,5 +1,10 @@
 # 开发记录
 
+## 0.3.0-alpha.66 — 2026-11-27
+
+- Initialize FYHOCT with the verified engine and deps pair. Check the official
+  readiness result and container state, and report documented installer errors.
+
 ## 0.3.0-alpha.65 — 2026-11-27
 
 - Collect the hostname and optional root password before setup applies changes.
