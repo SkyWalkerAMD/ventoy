@@ -22,6 +22,7 @@ System configuration
   (no command), --apply       Configure hostname, SSH, accounts, DHCP, E610
                               when needed, kernel locks and update policy.
                               Install and verify the default software group.
+                              In a terminal, offer to change the root password.
   --hostname NAME             Set a hostname during full setup.
   --keep-passwords            Keep existing account passwords during setup.
   --offline                   Skip software downloads during full setup.
