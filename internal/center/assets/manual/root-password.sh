@@ -16,14 +16,26 @@ if [[ -e "$state/login-policy.json" || -L "$state/login-policy.json" ]]; then
 fi
 exec 7>"$state/lock"
 flock -n 7 || { echo 'Another setup/check is running; root password unchanged.' >&2; exit 1; }
+choice_timeout=60
+password_prompt_timeout=120
+printf '\nChange the root password now? [y/N] (%ss, default: keep current) ' "$choice_timeout" >&2
+if ! IFS= read -r -t "$choice_timeout" choice; then
+    printf '\nRoot password retained.\n'
+    exit 0
+fi
+case "$choice" in
+    y|Y|yes|YES|Yes) ;;
+    *) echo 'Root password retained.'; exit 0;;
+esac
+
 password=; confirmation=; matched=0
 for attempt in 1 2 3; do
-    if ! IFS= read -r -s -p 'New root password (Enter to keep current): ' password; then
+    if ! IFS= read -r -s -t "$password_prompt_timeout" -p 'New root password (input hidden, Enter to cancel): ' password; then
         echo; echo 'Root password change canceled; unchanged.'; exit 0
     fi
     echo
     [[ -n $password ]] || { echo 'Root password retained.'; exit 0; }
-    if ! IFS= read -r -s -p 'Confirm new root password: ' confirmation; then
+    if ! IFS= read -r -s -t "$password_prompt_timeout" -p 'Confirm new root password (input hidden): ' confirmation; then
         echo; echo 'Root password change canceled; unchanged.'; exit 0
     fi
     echo

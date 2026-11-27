@@ -1,5 +1,10 @@
 # 开发记录
 
+## 0.3.0-alpha.65 — 2026-11-27
+
+- Show an explicit root password change choice after interactive setup. Keep
+  the existing password on timeout and hide typed password characters.
+
 ## 0.3.0-alpha.64 — 2026-11-22
 
 - Expand setup help with command groups, examples, exit codes, and a `help` alias.
