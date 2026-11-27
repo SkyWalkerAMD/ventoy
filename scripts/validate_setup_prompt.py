@@ -44,7 +44,7 @@ exit "${FIXTURE_RC:-0}"
 '''
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode='w:gz') as archive:
-        for name, body in [('install.sh', payload), ('root-password.sh', b'#!/bin/bash\necho PASSWORD_DIALOG\nexit "${FIXTURE_PASSWORD_RC:-0}"\n')]:
+        for name, body in [('install.sh', payload), ('root-password.sh', b'#!/bin/bash\necho UNEXPECTED_LATE_PASSWORD_DIALOG\nexit 99\n')]:
             item = tarfile.TarInfo('ventoy-manual-setup/' + name)
             item.mode = 0o755
             item.size = len(body)
@@ -54,12 +54,11 @@ exit "${FIXTURE_RC:-0}"
     launcher.write_bytes(template.replace('@ARCHIVE_SHA256@', hashlib.sha256(data).hexdigest()).encode() + data)
     launcher.chmod(0o755)
 
-    def run(args=(), rename=True, rc=0, terminal=True, sudo=False, password_rc=0):
+    def run(args=(), rename=True, rc=0, terminal=True, sudo=False):
         (root / 'hostname').write_text('old-host\n')
         env = dict(os.environ, HOME=str(root / 'home'), PATH=str(root / 'bin') + ':' + os.environ['PATH'],
                    LC_ALL='POSIX', LANGUAGE='zh_CN',
-                   FIXTURE_HOSTNAME=str(root / 'hostname'), FIXTURE_RENAME=str(int(rename)), FIXTURE_RC=str(rc),
-                   FIXTURE_PASSWORD_RC=str(password_rc))
+                   FIXTURE_HOSTNAME=str(root / 'hostname'), FIXTURE_RENAME=str(int(rename)), FIXTURE_RC=str(rc))
         for key in ('SUDO_USER', 'SUDO_UID', 'BASH_ENV', 'ENV'):
             env.pop(key, None)
         if sudo:
@@ -95,30 +94,40 @@ exit "${FIXTURE_RC:-0}"
                 os.waitpid(pid, 0)
             os.close(fd)
         output = output.decode(errors='replace')
-        assert 'FRESH_BASH' not in output and 'CALLER_ACCOUNT_REFRESH' not in output, output
+        assert not any(marker in output for marker in ('FRESH_BASH', 'CALLER_ACCOUNT_REFRESH',
+                                                       'UNEXPECTED_LATE_PASSWORD_DIALOG', 'SETUP_SUMMARY')), output
         return os.waitstatus_to_exitcode(status), output
 
     code, out = run()
     assert 'SETUP_LOCALE_NOT_ENGLISH' not in out, out
-    assert code == 0 and 'PASSWORD_DIALOG' in out and 'HOSTNAME_VERIFIED: new-host' in out and 'run exec bash' in out, out
+    assert code == 0 and 'HOSTNAME_VERIFIED: new-host' in out and 'run exec bash' in out, out
     for options in ({'rename': False}, {'terminal': False}, {'args': ['--check']},
                     {'args': ['--resume']}, {'args': ['--software']}, {'rc': 17},
                     {'args': ['--restore-user-login']}, {'args': ['--check-login']},
                     {'rc': 4, 'terminal': False}, {'rc': 4, 'args': ['--software']}):
         code, out = run(**options)
         assert code == options.get('rc', 0) and 'FRESH_BASH' not in out and 'HOSTNAME_VERIFIED:' not in out, (options, code, out)
-        wanted = options.get('terminal', True) and options.get('rc', 0) in (0, 3, 4) and not options.get('args')
-        assert ('PASSWORD_DIALOG' in out) == wanted, (options, out)
     code, out = run(sudo=True)
     assert code == 0 and 'HOSTNAME_VERIFIED: new-host' in out, out
     for rc in (3, 4):
         for sudo in (False, True):
             code, out = run(rc=rc, sudo=sudo)
-            assert code == rc and 'PASSWORD_DIALOG' in out and 'HOSTNAME_VERIFIED: new-host' in out, (code, out)
+            assert code == rc and 'HOSTNAME_VERIFIED: new-host' in out, (code, out)
         code, out = run(rc=rc, rename=False)
-        assert code == rc and 'PASSWORD_DIALOG' in out and 'FRESH_BASH' not in out, (code, out)
-    code, out = run(rc=4, password_rc=2)
-    assert code == 4 and 'PASSWORD_DIALOG' in out, (code, out)
-    code, out = run(password_rc=2)
-    assert code == 2 and 'FRESH_BASH' not in out, (code, out)
-print('PASS: setup returns to the existing terminal after a rename, preserves status and keeps the password dialog')
+        assert code == rc and 'FRESH_BASH' not in out, (code, out)
+print('PASS: setup returns to the existing terminal after a rename and preserves payload status without a late prompt')
+
+completion = ROOT / 'internal/center/assets/manual/ventoy-setup-completion.bash'
+subprocess.run(['bash', '-ec', '''
+source "$1"
+complete -p ventoy-linux-setup.run
+COMP_WORDS=(./ventoy-linux-setup.run --check-v)
+COMP_CWORD=1
+_ventoy_setup_complete
+[[ ${COMPREPLY[*]} == --check-version ]]
+COMP_WORDS=(/root/ventoy-linux-setup.run --upgrade --)
+COMP_CWORD=2
+_ventoy_setup_complete
+[[ ${COMPREPLY[*]} == '--hostname --keep-passwords' ]]
+''', 'completion-fixture', str(completion)], check=True)
+print('PASS: Bash offers setup commands and options allowed by the selected command')

@@ -22,7 +22,7 @@ System configuration
   (no command), --apply       Configure hostname, SSH, accounts, DHCP, E610
                               when needed, kernel locks and update policy.
                               Install and verify the default software group.
-                              In a terminal, offer to change the root password.
+                              Ask for hostname and optional root password first.
   --hostname NAME             Set a hostname during full setup.
   --keep-passwords            Keep existing account passwords during setup.
   --offline                   Skip software downloads during full setup.
@@ -147,19 +147,6 @@ case "${1:-}" in
 esac
 bash "$stage/ventoy-manual-setup/install.sh" "$@" || setup_rc=$?
 case "${1:-}" in --restore-user-login|--check-login|--install-fyhoct) exit "$setup_rc";; esac
-if (( (setup_rc == 0 || setup_rc == 3 || setup_rc == 4) && interactive_apply)) && [[ -t 0 && -t 1 && -t 2 ]]; then
-    # Status 4 means system checks reached the software step, which failed.
-    # That independent failure must not hide the optional password dialog.
-    password_rc=0
-    bash "$stage/ventoy-manual-setup/root-password.sh" || password_rc=$?
-    if ((password_rc && setup_rc != 4)); then setup_rc=$password_rc; fi
-fi
-case "$setup_rc" in
-    0) echo 'SETUP_SUMMARY: requested checks completed; see /var/log/ventoy-manual-init.log and /var/lib/ventoy-center/software/last-result.json';;
-    3) echo 'SETUP_SUMMARY: pending DHCP/driver reboot/firmware; use --check after resolving the pending item';;
-    4) echo 'SETUP_SUMMARY: software failed. Review pending system checks above; retry --software after fixing the reported package error';;
-    *) echo "SETUP_SUMMARY: incomplete (exit $setup_rc). Inspect the first failed stage before retrying";;
-esac
 # Return control to the original login. A nested shell would keep both setup
 # and a local console session open while waiting for a second exit.
 if (((setup_rc == 0 || setup_rc == 3 || setup_rc == 4) && interactive_apply)) && [[ -t 0 && -t 1 && -t 2 ]]; then

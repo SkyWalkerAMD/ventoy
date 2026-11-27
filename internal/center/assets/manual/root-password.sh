@@ -1,48 +1,59 @@
 #!/usr/bin/env bash
-# Optional one-time password change, only from the interactive .run launcher.
+# Collect the optional password on a terminal, then apply it through a pipe.
 set +x
 set -Eeuo pipefail
 umask 077
 ulimit -c 0
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C
-[[ $EUID == 0 && -t 0 && -t 1 && -t 2 ]] || exit 0
+[[ $EUID == 0 ]] || exit 1
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 state=/var/lib/ventoy-center/manual-init
-[[ -d $state && ! -L $state && $(stat -c %u "$state") == 0 ]] || exit 1
+[[ ! -L $state && ( ! -e $state || ( -d $state && $(stat -c %u "$state") == 0 ) ) ]] || exit 1
 [[ ! -L "$state/root-password-custom" ]] || exit 1
 if [[ -e "$state/login-policy.json" || -L "$state/login-policy.json" ]]; then
-    echo 'Root direct login remains disabled by the selected user/sudo policy; no root password change is offered.'
+    echo 'Root direct login remains disabled by the selected user/sudo policy; no root password change is offered.' >&2
+    [[ ${1:-} != --apply ]] || exit 1
     exit 0
 fi
+if [[ ${1:-} == --prompt ]]; then
+    [[ -t 0 && -t 2 ]] || exit 0
+    exec 3>&1 1>&2
+    choice_timeout=60
+    password_prompt_timeout=120
+    printf '\nChange the root password now? [y/N] (%ss, default: keep current) ' "$choice_timeout" >&2
+    if ! IFS= read -r -t "$choice_timeout" choice; then
+        printf '\nRoot password retained.\n'
+        exit 0
+    fi
+    case "$choice" in
+        y|Y|yes|YES|Yes) ;;
+        *) echo 'Root password retained.'; exit 0;;
+    esac
+
+    password=; confirmation=; matched=0
+    for attempt in 1 2 3; do
+        if ! IFS= read -r -s -t "$password_prompt_timeout" -p 'New root password (input hidden, Enter to cancel): ' password; then
+            echo; echo 'Root password change canceled; unchanged.'; exit 0
+        fi
+        echo
+        [[ -n $password ]] || { echo 'Root password retained.'; exit 0; }
+        if ! IFS= read -r -s -t "$password_prompt_timeout" -p 'Confirm new root password (input hidden): ' confirmation; then
+            echo; echo 'Root password change canceled; unchanged.'; exit 0
+        fi
+        echo
+        if [[ $password == "$confirmation" ]]; then matched=1; break; fi
+        echo 'Passwords do not match; nothing changed.'
+    done
+    ((matched)) || { echo 'Root password unchanged after three attempts.' >&2; exit 2; }
+    printf '%s\n' "$password" >&3
+    exit 0
+fi
+
+[[ ${1:-} == --apply && ! -t 0 && -d $state ]] || exit 2
 exec 7>"$state/lock"
 flock -n 7 || { echo 'Another setup/check is running; root password unchanged.' >&2; exit 1; }
-choice_timeout=60
-password_prompt_timeout=120
-printf '\nChange the root password now? [y/N] (%ss, default: keep current) ' "$choice_timeout" >&2
-if ! IFS= read -r -t "$choice_timeout" choice; then
-    printf '\nRoot password retained.\n'
-    exit 0
-fi
-case "$choice" in
-    y|Y|yes|YES|Yes) ;;
-    *) echo 'Root password retained.'; exit 0;;
-esac
-
-password=; confirmation=; matched=0
-for attempt in 1 2 3; do
-    if ! IFS= read -r -s -t "$password_prompt_timeout" -p 'New root password (input hidden, Enter to cancel): ' password; then
-        echo; echo 'Root password change canceled; unchanged.'; exit 0
-    fi
-    echo
-    [[ -n $password ]] || { echo 'Root password retained.'; exit 0; }
-    if ! IFS= read -r -s -t "$password_prompt_timeout" -p 'Confirm new root password (input hidden): ' confirmation; then
-        echo; echo 'Root password change canceled; unchanged.'; exit 0
-    fi
-    echo
-    if [[ $password == "$confirmation" ]]; then matched=1; break; fi
-    echo 'Passwords do not match; nothing changed.'
-done
-((matched)) || { echo 'Root password unchanged after three attempts.' >&2; exit 2; }
+IFS= read -r password && [[ -n $password ]] || exit 2
+[[ ! -e "$state/login-policy.json" && ! -L "$state/login-policy.json" ]] || exit 1
 scratch=$(mktemp -d "$state/password-check.XXXXXXXX")
 trap 'unset password confirmation; rm -rf -- "$scratch"' EXIT
 printf '%s\n' "$password" > "$scratch/root-password"

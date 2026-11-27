@@ -29,7 +29,7 @@ def run(entries, expected, password_rc=0, ssh_rc=0, terminal=True, user_login=Fa
             (state / 'login-policy.json').write_text('{"schema":1,"mode":"user-sudo","user":"user"}\n')
         binpath = root / 'bin'
         binpath.mkdir()
-        source = SOURCE.replace('[[ $EUID == 0 && ', '[[ ')
+        source = SOURCE.replace('[[ $EUID == 0 ]] || exit 1', ':')
         source = source.replace('$(stat -c %u "$state") == 0', '$(stat -c %u "$state") == ' + str(os.getuid()))
         source = source.replace('state=/var/lib/ventoy-center/manual-init', 'state=' + shlex.quote(str(state)))
         source = source.replace('choice_timeout=60', 'choice_timeout=1')
@@ -56,7 +56,12 @@ exit "$FIXTURE_SSH_RC"
 ''')
         env = dict(os.environ, FIXTURE_STATE=str(state), FIXTURE_PASSWORD_RC=str(password_rc), FIXTURE_SSH_RC=str(ssh_rc),
                    FIXTURE_FILE_SHA=hashlib.sha256((SECRET + '\n').encode()).hexdigest())
-        args = ['/bin/bash', str(root / 'root-password.sh')]
+        args = ['/bin/bash', '-ec', '''
+password=$(bash "$1" --prompt)
+if [[ -n $password ]]; then
+    printf '%s\n' "$password" | bash "$1" --apply
+fi
+''', 'setup-password-fixture', str(root / 'root-password.sh')]
         if not terminal:
             p = subprocess.run(args, env=env, capture_output=True, timeout=10)
             assert p.returncode == 0 and not list(state.iterdir())

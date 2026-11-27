@@ -32,6 +32,17 @@ class Boundaries(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_download_reports_large_file_progress(self):
+        data = b'x' * (10 * 1024**2)
+        item = dict(path='group/large.tgz', size=len(data), sha256=hashlib.sha256(data).hexdigest())
+        with tempfile.TemporaryDirectory() as tmp, patch('sys.stdout', new_callable=io.StringIO) as out:
+            dest = Path(tmp) / 'large.tgz'
+            transport = type('Transport', (), {'get': lambda *args: io.BytesIO(data)})()
+            client.Client.download(transport, item, str(dest))
+            self.assertIn('large.tgz 0.0 / 10.0 MiB (0%)', out.getvalue())
+            self.assertIn('large.tgz 10.0 / 10.0 MiB (100%)', out.getvalue())
+            self.assertEqual(dest.read_bytes(), data)
+
     @unittest.skipUnless((source.parent / 'uninstall.py').is_file(), 'requires full setup source')
     def test_uninstall_selects_owned_packages_and_unchanged_files(self):
         import uninstall

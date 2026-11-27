@@ -4,9 +4,11 @@ The transports and OS helpers are inert fixtures. No host accounts, network,
 services, kernels or installation files are modified.
 """
 import hashlib
+import errno
 import io
 import os
 from pathlib import Path
+import select
 import shlex
 import subprocess
 import sys
@@ -17,6 +19,7 @@ import unittest
 if sys.platform != 'linux':
     print('SKIP: Linux existing-node upgrade tests')
     sys.exit(0)
+import pty
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / 'internal/center/assets'
@@ -43,6 +46,9 @@ os.lstat = _fixture_owned(os.lstat)''')
         'setup-release.py': updater,
         'software.py': '''import io, json, hashlib, os
 HERE = os.path.dirname(__file__)
+class DownloadProgress:
+    def __init__(self, name, total): pass
+    def update(self, size): pass
 class Client:
     def __init__(self, config): pass
     def get(self, endpoint, params):
@@ -182,6 +188,8 @@ esac''',
             '/etc/cloud/cloud.cfg.d': str(self.root / 'cloud'),
             '/usr/local/sbin/safe-server-init': str(self.root / 'sbin/safe-server-init'),
             '/opt/ventoy-manual': str(self.root / 'opt/ventoy-manual'),
+            '/usr/share/ventoy-setup': str(self.root / 'share/ventoy-setup'),
+            '/etc/profile.d': str(self.root / 'profile.d'),
             '/etc/systemd/system': str(self.root / 'systemd'),
         }.items():
             source = source.replace(old, new)
@@ -195,6 +203,16 @@ esac''',
             if name == 'linux-update-policy.sh':
                 text += '[ "${FAIL_POLICY:-}" != "$1" ] || exit 89\n'
             (self.here / name).write_text(text)
+        for name in ('ventoy-setup-completion.sh', 'ventoy-setup-completion.bash'):
+            (self.here / name).write_bytes((ASSETS / 'manual' / name).read_bytes())
+        (self.here / 'root-password.sh').write_text('''#!/bin/bash
+set -eu
+case "$1" in
+    --prompt) echo FIXTURE_PASSWORD_PROMPT >&2; echo fixture-secret;;
+    --apply) IFS= read -r password; [[ $password == fixture-secret ]]; echo FIXTURE_PASSWORD_APPLIED;;
+    *) exit 99;;
+esac
+''')
         self.release('new')
 
     def release(self, version):
@@ -223,6 +241,32 @@ esac''',
             self.assertEqual((self.root / 'systemd/ventoy-manual-init.service').read_text(), 'fixture service ' + version + '\n')
             self.assertEqual((self.state / 'keep-passwords').read_text(), '1\n')
             self.assertEqual((self.state / 'applied-version').read_text(), version + '\n')
+            self.assertTrue((self.root / 'profile.d/ventoy-setup-completion.sh').is_file())
+            self.assertTrue((self.root / 'share/ventoy-setup/ventoy-setup-completion.bash').is_file())
+
+    def test_full_apply_collects_password_before_configuration(self):
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        with subprocess.Popen(['bash', str(self.here / 'install.sh'), '--apply', '--offline'],
+                              env=self.env, stdin=slave, stdout=slave, stderr=slave) as process:
+            os.close(slave)
+            os.write(master, b'\n')  # Keep the existing hostname.
+            output = b''
+            while True:
+                if not select.select([master], [], [], 10)[0]:
+                    process.kill()
+                    self.fail('Timed out waiting for fixture output: %r' % output)
+                try:
+                    output += os.read(master, 65536)
+                except OSError as error:
+                    if error.errno != errno.EIO:
+                        raise
+                    break
+            self.assertEqual(process.wait(timeout=10), 0, output)
+        self.assertLess(output.index(b'New hostname'), output.index(b'FIXTURE_PASSWORD_PROMPT'), output)
+        self.assertLess(output.index(b'FIXTURE_PASSWORD_PROMPT'), output.index(b'SETUP_STAGE:'), output)
+        self.assertLess(output.index(b'VERIFIED:'), output.index(b'FIXTURE_PASSWORD_APPLIED'), output)
+        self.assertNotIn(b'fixture-secret', output)
 
     def test_legacy_configured_node_migrates_once_and_next_version_migrates(self):
         result = self.resume()

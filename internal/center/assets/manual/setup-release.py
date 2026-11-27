@@ -8,6 +8,7 @@ import stat
 import sys
 import tempfile
 from software import Client, HERE
+from software import DownloadProgress
 
 
 def checksum_target(destination):
@@ -84,6 +85,7 @@ def execute(action, destination):
     fd, temporary = tempfile.mkstemp(prefix='.ventoy-setup-', dir=os.path.dirname(destination))
     try:
         h, size = hashlib.sha256(), 0
+        progress = DownloadProgress('ventoy-linux-setup.run', release['bytes'])
         with os.fdopen(fd, 'wb') as f:
             response = client.get('setup-release/download', {})
             try:
@@ -96,6 +98,7 @@ def execute(action, destination):
                         raise RuntimeError('Setup size changed during download')
                     h.update(block)
                     f.write(block)
+                    progress.update(size)
                 f.flush()
                 os.fsync(f.fileno())
             finally:
