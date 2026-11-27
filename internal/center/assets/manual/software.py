@@ -49,6 +49,25 @@ def copy_only(name, policy=COPY_ONLY_PACKAGES):
     return name.split(':', 1)[0] in policy
 
 
+class DownloadProgress(object):
+    def __init__(self, name, total):
+        self.name, self.total = name, total
+        self.last_percent, self.last_time = -10, 0
+        self.update(0)
+
+    def update(self, size):
+        if self.total < 8 * 1024**2:
+            return
+        percent = size * 100 // self.total
+        now = time.time()
+        if size != self.total and percent < self.last_percent + 10 and now < self.last_time + 5:
+            return
+        print('DOWNLOAD: %s %.1f / %.1f MiB (%d%%)' %
+              (self.name, size / 1024.0**2, self.total / 1024.0**2, percent))
+        sys.stdout.flush()
+        self.last_percent, self.last_time = percent, now
+
+
 def run(args, echo=False):
     p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          env=dict(os.environ, LC_ALL='C', DEBIAN_FRONTEND='noninteractive'))
@@ -56,7 +75,12 @@ def run(args, echo=False):
         chunks = []
         for line in iter(p.stdout.readline, b''):
             chunks.append(line)
-            sys.stdout.write(line.decode('utf-8', 'replace'))
+            output = line.decode('utf-8', 'replace')
+            progress = re.match(r'^pmstatus:(.+?):([0-9.]+):(.*)$', output.rstrip())
+            if progress:
+                package, percent, message = progress.groups()
+                output = 'PACKAGE_INSTALL: APT %s%% %s (%s)\n' % (percent, message, package)
+            sys.stdout.write(output)
             sys.stdout.flush()
         p.wait()
         data = b''.join(chunks).decode('utf-8', 'replace')
@@ -130,6 +154,7 @@ class Client(object):
 
     def download(self, item, dest):
         digest, size = hashlib.sha256(), 0
+        progress = DownloadProgress(item['path'].rsplit('/', 1)[-1], item['size'])
         response = self.get('package', {'path': item['path'], 'sha256': item['sha256']})
         try:
             with open(dest, 'wb') as f:
@@ -142,6 +167,7 @@ class Client(object):
                         raise RuntimeError('Package size changed: ' + item['path'])
                     digest.update(block)
                     f.write(block)
+                    progress.update(size)
         finally:
             response.close()
         if size != item['size'] or digest.hexdigest() != item['sha256']:
@@ -424,6 +450,8 @@ def transaction(packages, family, work, allow_dependencies=True, policy=COPY_ONL
             print('SKIP: %s is already installed at the requested version or newer.' % p['name'])
     if pending:
         files = [p['file'] for p in pending]
+        print('PACKAGE_INSTALL: preparing %d package(s)' % len(pending))
+        sys.stdout.flush()
         if family == 'deb':
             for folder in ('lists/partial', 'archives/partial', 'sourceparts'):
                 os.makedirs(os.path.join(work, folder))
@@ -453,7 +481,7 @@ def transaction(packages, family, work, allow_dependencies=True, policy=COPY_ONL
                     raise RuntimeError('Package transaction would remove software or change the kernel')
                 if line.startswith(('Inst ', 'Conf ')) and copy_only(line.split()[1], policy):
                     raise RuntimeError('APT would install or configure a copy-only package: ' + line.split()[1])
-            run(base + ['-y', 'install'] + files, echo=True)
+            run(base + ['-o', 'APT::Status-Fd=1', '-y', 'install'] + files, echo=True)
         else:
             # First resolve against the supplied set and installed database.
             # Use configured repositories only if dependencies are missing.
@@ -472,7 +500,7 @@ def transaction(packages, family, work, allow_dependencies=True, policy=COPY_ONL
                 run(args + ['--setopt=tsflags=test', 'install'] + files, echo=True)
                 run_rpm_transaction(args + ['install'] + files)
             else:
-                run_rpm_transaction(['rpm', '-Uvh'] + files)
+                run_rpm_transaction(['rpm', '-Uv', '--percent'] + files)
     verify(packages, family, before, policy)
     return len(pending)
 

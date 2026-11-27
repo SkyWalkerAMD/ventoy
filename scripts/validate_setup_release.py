@@ -37,6 +37,7 @@ class SetupRelease(unittest.TestCase):
                 if endpoint=='setup-release':return io.BytesIO(json.dumps(test.manifest).encode())
                 test.before_download();return io.BytesIO(test.data)
         fake=types.ModuleType('software');fake.Client=Client;fake.HERE=str(self.root)
+        fake.DownloadProgress=mock.Mock()
         patch=mock.patch.dict(sys.modules,{'software':fake});patch.start();self.addCleanup(patch.stop)
         spec=importlib.util.spec_from_file_location('setup_release_test',SOURCE)
         self.mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.mod)

@@ -154,8 +154,8 @@ is performed.
 
 ## Results, reboot, and recovery
 
-`VERIFIED` means all applicable checks in that stage passed. Read `SETUP_SUMMARY`
-for the complete result. `E610_NOT_PRESENT` means there is no E610 hardware and
+`VERIFIED` means all applicable checks in that stage passed.
+`E610_NOT_PRESENT` means there is no E610 hardware and
 no driver was replaced. Exit 3 / `PENDING` means a driver reboot, MOK enrollment,
 or DHCP lease is still required. Exit 4 means system checks finished but software
 installation or verification failed. Neither is a fully verified setup.

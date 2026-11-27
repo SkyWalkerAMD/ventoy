@@ -20,7 +20,7 @@ SOURCE = (ROOT / 'internal/center/assets/manual/root-password.sh').read_text()
 SECRET = '  fixture:Pa$$`word\"!  '
 
 
-def run(entries, expected, password_rc=0, ssh_rc=0, terminal=True, user_login=False):
+def run(entries, expected, password_rc=0, ssh_rc=0, terminal=True, user_login=False, message=None):
     with tempfile.TemporaryDirectory(prefix='vc-root-password-') as folder:
         root = Path(folder)
         state = root / 'state'
@@ -29,9 +29,10 @@ def run(entries, expected, password_rc=0, ssh_rc=0, terminal=True, user_login=Fa
             (state / 'login-policy.json').write_text('{"schema":1,"mode":"user-sudo","user":"user"}\n')
         binpath = root / 'bin'
         binpath.mkdir()
-        source = SOURCE.replace('[[ $EUID == 0 && ', '[[ ')
+        source = SOURCE.replace('[[ $EUID == 0 ]] || exit 1', ':')
         source = source.replace('$(stat -c %u "$state") == 0', '$(stat -c %u "$state") == ' + str(os.getuid()))
         source = source.replace('state=/var/lib/ventoy-center/manual-init', 'state=' + shlex.quote(str(state)))
+        source = source.replace('password_prompt_timeout=120', 'password_prompt_timeout=1')
         source = source.replace('export PATH=/usr/sbin:/usr/bin:/sbin:/bin', 'export PATH=' + shlex.quote(str(binpath)) + ':/usr/sbin:/usr/bin:/sbin:/bin')
         (root / 'root-password.sh').write_text(source)
         command = binpath / 'chpasswd'
@@ -54,7 +55,12 @@ exit "$FIXTURE_SSH_RC"
 ''')
         env = dict(os.environ, FIXTURE_STATE=str(state), FIXTURE_PASSWORD_RC=str(password_rc), FIXTURE_SSH_RC=str(ssh_rc),
                    FIXTURE_FILE_SHA=hashlib.sha256((SECRET + '\n').encode()).hexdigest())
-        args = ['/bin/bash', str(root / 'root-password.sh')]
+        args = ['/bin/bash', '-ec', '''
+password=$(bash "$1" --prompt)
+if [[ -n $password ]]; then
+    printf '%s\n' "$password" | bash "$1" --apply
+fi
+''', 'setup-password-fixture', str(root / 'root-password.sh')]
         if not terminal:
             p = subprocess.run(args, env=env, capture_output=True, timeout=10)
             assert p.returncode == 0 and not list(state.iterdir())
@@ -75,7 +81,10 @@ exit "$FIXTURE_SSH_RC"
                     except OSError as e:
                         if e.errno != errno.EIO:
                             raise
-                prompts = output.count(b'New root password (Enter to keep current): ') + output.count(b'Confirm new root password: ')
+                prompts = sum(output.count(prompt) for prompt in (
+                    b'New root password (Enter to keep current; input hidden): ',
+                    b'Confirm new root password (input hidden): ',
+                ))
                 if sent < prompts and sent < len(entries):
                     value = entries[sent]
                     os.write(fd, b'\x04' if value is None else (value + '\n').encode())
@@ -91,6 +100,11 @@ exit "$FIXTURE_SSH_RC"
                 os.waitpid(pid, 0)
             os.close(fd)
         assert os.waitstatus_to_exitcode(status) == expected, output
+        if message:
+            assert message in output, output
+        assert b'[y/N]' not in output, output
+        if entries == ['']:
+            assert b'Confirm new root password' not in output, output
         assert SECRET.encode() not in output, 'Password was echoed'
         assert not list(state.glob('password-check.*')), 'Plaintext scratch was retained'
         changed = (state / 'root-password-custom').exists()
@@ -107,9 +121,11 @@ exit "$FIXTURE_SSH_RC"
 run([SECRET, SECRET], 0)
 run(['mismatch-one', 'mismatch-two', SECRET, SECRET], 0)
 run(['one', 'two'] * 3, 2)
-run([''], 0)
-run([None], 0)
-run([SECRET, None], 0)
+run([''], 0, message=b'Root password retained.')
+run([None], 0, message=b'Root password change canceled; unchanged.')
+run([], 0, message=b'Root password change canceled; unchanged.')
+run([SECRET, None], 0, message=b'Root password change canceled; unchanged.')
+run([SECRET], 0, message=b'Root password change canceled; unchanged.')
 run([SECRET, SECRET], 1, password_rc=17)
 run([SECRET, SECRET], 1, ssh_rc=19)
 run([], 0, terminal=False)

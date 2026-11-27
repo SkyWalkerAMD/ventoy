@@ -1,5 +1,12 @@
 # 开发记录
 
+## 0.3.0-alpha.65 — 2026-11-27
+
+- Collect the hostname and optional root password before setup applies changes.
+  Keep the existing password on timeout and hide typed password characters.
+- Show large-file downloads and native package installation progress. Install
+  context-aware Bash completion for setup commands.
+
 ## 0.3.0-alpha.64 — 2026-11-22
 
 - Expand setup help with command groups, examples, exit codes, and a `help` alias.

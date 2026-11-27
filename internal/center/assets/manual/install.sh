@@ -174,14 +174,21 @@ choose_hostname() {
 }
 if [[ $mode == --apply ]]; then
     (cd "$here" && sha256sum --status -c SHA256SUMS) || die 'Package integrity check failed.'
+    # Resolve interactive inputs before installing drivers, changing accounts or downloading software.
+    source "$here/safe-server-init.sh"
+    choose_hostname
+    set +ax
+    unset new_root_password
+    new_root_password=
+    if [[ $keep_passwords == 0 && -t 0 && -t 1 && -t 2 ]]; then
+        ulimit -c 0
+        new_root_password=$(bash "$here/root-password.sh" --prompt) || exit $?
+    fi
     # An existing setup owns account policy, not the administrator's current
     # passwords. Upgrades/retries must not reset them or try stale defaults.
     if [[ -f "$state/accounts-set" && $(cat "$state/accounts-set") == user ]]; then
         keep_passwords=1
     fi
-    # Load only helper functions; hostname validation does not change the host.
-    source "$here/safe-server-init.sh"
-    choose_hostname
     # Keep a complete offline copy for automatic post-reboot continuation.
     release=$(sha256sum "$here/SHA256SUMS" | cut -c1-16)
     dest=/opt/ventoy-manual/$release
@@ -211,6 +218,15 @@ if [[ $mode == --apply ]]; then
     printf '%s\n' "$offline" > "$state/offline"
     printf '%s\n' "$keep_passwords" > "$state/keep-passwords"
     printf '%s\n' "$((1 - offline))" > "$state/software-request"
+    if [[ ! -L /usr/share/ventoy-setup ]]; then
+        for completion in /usr/share/ventoy-setup/ventoy-setup-completion.bash /etc/profile.d/ventoy-setup-completion.sh; do
+            if [[ ! -e $completion && ! -L $completion ]]; then
+                install -D -m 0644 "$dest/${completion##*/}" "$completion"
+            elif [[ -L $completion ]] || ! cmp -s "$dest/${completion##*/}" "$completion"; then
+                echo "Bash completion: existing $completion retained." >&2
+            fi
+        done
+    fi
     install -m 0644 "$dest/ventoy-manual-init.service" /etc/systemd/system/ventoy-manual-init.service
     if command -v restorecon >/dev/null; then
         restorecon -R /opt/ventoy-manual /etc/systemd/system/ventoy-manual-init.service
@@ -219,7 +235,19 @@ if [[ $mode == --apply ]]; then
     systemctl enable ventoy-manual-init.service
     systemctl reset-failed ventoy-manual-init.service || true
     flock -u 7
-    exec bash "$dest/install.sh" "${args[@]}"
+    if [[ -z $new_root_password ]]; then
+        exec bash "$dest/install.sh" "${args[@]}"
+    fi
+    setup_rc=0
+    bash "$dest/install.sh" "${args[@]}" || setup_rc=$?
+    case "$setup_rc" in
+        0|3|4)
+            password_rc=0
+            printf '%s\n' "$new_root_password" | bash "$dest/root-password.sh" --apply || password_rc=$?
+            if ((password_rc && setup_rc != 4)); then setup_rc=$password_rc; fi;;
+    esac
+    unset new_root_password
+    exit "$setup_rc"
 fi
 [[ -f "$state/offline" && -f "$state/keep-passwords" ]] || die 'Run setup without arguments (or with --apply) first.'
 offline=$(cat "$state/offline"); keep_passwords=$(cat "$state/keep-passwords")

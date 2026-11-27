@@ -197,6 +197,12 @@ def uninstall(args):
     if (os.path.isfile(helper) and not os.path.islink(helper) and
             filecmp.cmp(helper, os.path.join(software.HERE, 'safe-server-init.sh'), shallow=False)):
         unlink(helper)
+    for completion in ('/etc/profile.d/ventoy-setup-completion.sh',
+                       '/usr/share/ventoy-setup/ventoy-setup-completion.bash'):
+        source = os.path.join(software.HERE, os.path.basename(completion))
+        if (os.path.isfile(source) and os.path.isfile(completion) and os.path.realpath(completion) == completion and
+                filecmp.cmp(completion, source, shallow=False)):
+            unlink(completion)
     remove_payloads()
     remove_runners(args.runner)
     print('UNINSTALL_COMPLETE: setup-managed packages and files removed.')
