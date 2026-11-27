@@ -8,6 +8,8 @@
 
 将同版发布的 RPM / DEB、`oc-engine-linux.tar.gz.enc` 和 `oc-deps-linux.tar.gz.enc` 放进 tools。中心的 `fyhoct_install_key_file` 指向软件服务账号可读的 0600 私有文件，路径位于 tools 之外。显式安装命令从鉴权接口读取密钥，仅供初始化进程使用。常规软件结果继续分别记录 `packages` 和 `copy_only_packages`。
 
+初始化使用只包含这两个校验过的组件包的工作目录。由官方 `fyhoct install` 选择原生或容器后端。验收读取 `fyhoct api ready --api 1`，容器模式还检查依赖镜像和容器状态。安装失败时会报告退出码和已知原因，完整诊断见节点 `/var/log/fyhoct`。
+
 ## 服务器目录
 
 本次部署使用用户指定的 `/home/ventoy-center/iventoy/tools/`。管理端 `config.json` 增加：
