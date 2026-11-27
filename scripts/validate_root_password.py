@@ -32,7 +32,6 @@ def run(entries, expected, password_rc=0, ssh_rc=0, terminal=True, user_login=Fa
         source = SOURCE.replace('[[ $EUID == 0 ]] || exit 1', ':')
         source = source.replace('$(stat -c %u "$state") == 0', '$(stat -c %u "$state") == ' + str(os.getuid()))
         source = source.replace('state=/var/lib/ventoy-center/manual-init', 'state=' + shlex.quote(str(state)))
-        source = source.replace('choice_timeout=60', 'choice_timeout=1')
         source = source.replace('password_prompt_timeout=120', 'password_prompt_timeout=1')
         source = source.replace('export PATH=/usr/sbin:/usr/bin:/sbin:/bin', 'export PATH=' + shlex.quote(str(binpath)) + ':/usr/sbin:/usr/bin:/sbin:/bin')
         (root / 'root-password.sh').write_text(source)
@@ -83,8 +82,7 @@ fi
                         if e.errno != errno.EIO:
                             raise
                 prompts = sum(output.count(prompt) for prompt in (
-                    b'Change the root password now? [y/N]',
-                    b'New root password (input hidden, Enter to cancel): ',
+                    b'New root password (Enter to keep current; input hidden): ',
                     b'Confirm new root password (input hidden): ',
                 ))
                 if sent < prompts and sent < len(entries):
@@ -104,6 +102,9 @@ fi
         assert os.waitstatus_to_exitcode(status) == expected, output
         if message:
             assert message in output, output
+        assert b'[y/N]' not in output, output
+        if entries == ['']:
+            assert b'Confirm new root password' not in output, output
         assert SECRET.encode() not in output, 'Password was echoed'
         assert not list(state.glob('password-check.*')), 'Plaintext scratch was retained'
         changed = (state / 'root-password-custom').exists()
@@ -117,19 +118,16 @@ fi
             assert not (state / 'ssh-checked').exists()
 
 
-run(['y', SECRET, SECRET], 0)
-run(['yes', 'mismatch-one', 'mismatch-two', SECRET, SECRET], 0)
-run(['y'] + ['one', 'two'] * 3, 2)
+run([SECRET, SECRET], 0)
+run(['mismatch-one', 'mismatch-two', SECRET, SECRET], 0)
+run(['one', 'two'] * 3, 2)
 run([''], 0, message=b'Root password retained.')
-run(['n'], 0, message=b'Root password retained.')
-run([], 0, message=b'Root password retained.')
-run(['y', ''], 0, message=b'Root password retained.')
-run(['y', None], 0, message=b'Root password change canceled; unchanged.')
-run(['y'], 0, message=b'Root password change canceled; unchanged.')
-run(['y', SECRET, None], 0, message=b'Root password change canceled; unchanged.')
-run(['y', SECRET], 0, message=b'Root password change canceled; unchanged.')
-run(['y', SECRET, SECRET], 1, password_rc=17)
-run(['y', SECRET, SECRET], 1, ssh_rc=19)
+run([None], 0, message=b'Root password change canceled; unchanged.')
+run([], 0, message=b'Root password change canceled; unchanged.')
+run([SECRET, None], 0, message=b'Root password change canceled; unchanged.')
+run([SECRET], 0, message=b'Root password change canceled; unchanged.')
+run([SECRET, SECRET], 1, password_rc=17)
+run([SECRET, SECRET], 1, ssh_rc=19)
 run([], 0, terminal=False)
 run([], 0, user_login=True)
 print('PASS: hidden password confirmation, exact whitespace, blank/cancel/retry, failures, SSH verification and secret cleanup')

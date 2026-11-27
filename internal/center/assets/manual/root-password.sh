@@ -18,21 +18,10 @@ fi
 if [[ ${1:-} == --prompt ]]; then
     [[ -t 0 && -t 2 ]] || exit 0
     exec 3>&1 1>&2
-    choice_timeout=60
     password_prompt_timeout=120
-    printf '\nChange the root password now? [y/N] (%ss, default: keep current) ' "$choice_timeout" >&2
-    if ! IFS= read -r -t "$choice_timeout" choice; then
-        printf '\nRoot password retained.\n'
-        exit 0
-    fi
-    case "$choice" in
-        y|Y|yes|YES|Yes) ;;
-        *) echo 'Root password retained.'; exit 0;;
-    esac
-
     password=; confirmation=; matched=0
     for attempt in 1 2 3; do
-        if ! IFS= read -r -s -t "$password_prompt_timeout" -p 'New root password (input hidden, Enter to cancel): ' password; then
+        if ! IFS= read -r -s -t "$password_prompt_timeout" -p 'New root password (Enter to keep current; input hidden): ' password; then
             echo; echo 'Root password change canceled; unchanged.'; exit 0
         fi
         echo

@@ -41,7 +41,7 @@ alpha.24 的普通 ISO 预置依赖 iVentoy 的注入绑定。alpha.25 的 E610 
 
 alpha.33 起，首次执行新版 setup 会补齐 `user` 账户和 sudo 权限，并设置 user/root 初始密码；旧版 admin 及其文件保留。root 的密码同时用于系统控制台和 SSH，不改变 BMC 网页账户。新版已完成账户配置后再次运行不会重置用户后来修改的密码；`--keep-passwords` 保留已有密码。
 
-交互式完整 setup 开始时集中询问主机名和是否修改 root 密码。输入 `y` 后可手动输入并确认新密码，密码字符不回显。选择回车或等待 60 秒则保留当前密码，输入和确认各有 120 秒。完成账户配置后应用新密码。`--keep-passwords` 和普通用户登录模式会跳过改密提示。
+交互式完整 setup 开始时先询问主机名，再直接提示输入新 root 密码。按 Enter 保留当前密码。输入新密码后需要再次确认，密码字符不回显。输入和确认各有 120 秒，超时则保留当前密码。完成账户配置后应用新密码。`--keep-passwords` 和普通用户登录模式会跳过改密提示。
 
 完整 setup 会安装 Bash 补全。重新登录 Bash，或在当前 Bash 执行 `source /etc/profile.d/ventoy-setup-completion.sh`，然后输入 `./ventoy-linux-setup.run --` 并按 Tab。匹配的大文件下载会显示已传输量和百分比，软件包安装会显示包管理器的进度。
 
